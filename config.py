@@ -1,5 +1,5 @@
 
-epochs = 2
+epochs = 1
 batch_size = 20
 
 alpha = 0.1
@@ -26,8 +26,9 @@ top_density = [200, 57, 55]
 density_dropout = [True, False, False, False]
 
 outputs = [0, 1]
-output_category = ['Correct', 'Incorrect']
+outputs_category = ['Correct', 'Incorrect']
 
+optimizers = ['SGD', 'Adam']
 optimizer = 'SGD' # Set to either 'SGD' or 'Adam'
 use_amsgrad = True # If using Adam optimizer
 use_nestrov = True # If using SDG optimizer
