@@ -1,5 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import reader, os, time, csv, random, nilearn, config, json, scipy
+import reader, os, time, csv, random, nilearn, config, json, scipy, shutil
 import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
@@ -7,7 +7,6 @@ from nilearn import image, plotting
 from nilearn.masking import compute_epi_mask
 from random import randint, randrange
 from scipy.interpolate import InterpolatedUnivariateSpline as Interp
-from deepbrain import Extractor
 
 class DataWrangler:
 
@@ -59,7 +58,12 @@ class DataWrangler:
 					self.affines.reshape((1, 4, 4))
 					self.headers = np.asarray(self.header)
 			self.volumes = self.volumes.reshape(removal_index, config.x_size, config.y_size, config.z_size, 1) # Add channel layer
-			os.mkdir(config.data_directory + self.subject_ID + '/' + config.numpy_output_dir)
+			try:
+				os.mkdir(config.data_directory + self.subject_ID + '/' + config.numpy_output_dir)
+			except:
+				shutil.rmtree(config.data_directory + self.subject_ID + '/' + config.numpy_output_dir)
+				time.sleep(1)
+				os.mkdir(config.data_directory + self.subject_ID + '/' + config.numpy_output_dir)
 			self.trim_n_wig()
 			data = [self.volumes, self.labels, self.affines, self.headers]
 			filenames = [config.volumes_filename_prefix + self.subject_ID + config.volumes_filename_suffix, config.labels_filename_prefix + self.subject_ID + config.labels_filename_suffix, config.affines_filename_prefix + self.subject_ID + config.affines_filename_suffix, config.header_filename_prefix + self.subject_ID + config.header_filename_suffix]
@@ -73,7 +77,7 @@ class DataWrangler:
 	def strip_skull(self):
 		extactor = Extractor() # generate a deepbrain extractor
 		self.prob = extractor.run(self.volumes) # Generate a volume of probabilities of the value to be tissue
-		# mask = prob > 0.5 # Generates a mask of all voxels that a likely brain tissue
+		mask = prob > 0.5 # Generates a mask of all voxels that a likely brain tissue
 		for vox_z in range(config.z_size):
 			for vox_x in range(config.x_size):
 				right_prob, left_prob, left_vox_y = 0
@@ -140,16 +144,16 @@ class DataWrangler:
 		plt.xlabel("Trim 'n Wig Index")
 		plt.ylabel("Count")
 		plot.savefig(config.data_directory + self.subject_ID + '/' + config.numpy_output_dir + '/' + 'TNW_results.png')
-		plot.close()
+		plt.close()
 
 	def normalize(self):
 		self.volumes = (self.volumes - self.minval) / (self.maxval - self.minval)
 
 	def shuffle(self):
-		deck = list(zip(self.volumes, self.labels, self.headers)) # Zip and create list of data
+		deck = list(zip(self.volumes, self.labels, self.affines, self.headers)) # Zip and create list of data
 		for i in range(10):
 			random.shuffle(deck) # Shuffle data a lot
-		self.volumes, self.labels, self.headers = zip(*deck) # Unzip data
+		self.volumes, self.labels, self.affines, self.headers = zip(*deck) # Unzip data
 
 	def count(self):
 		self.correct = 0
@@ -174,7 +178,7 @@ class DataWrangler:
 
 	# Pre-process
 
-	#	1. MotionCorrection
+	#	1. MotionCorrection?
 	#	2. Slice-TimingCorrection
 	#	3. B0DistortionCorrection
 	#	4. SpatialNormalization
