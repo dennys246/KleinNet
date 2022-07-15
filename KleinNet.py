@@ -90,11 +90,8 @@ class KleinNet:
 
 
 	def SVM(self):
-
 		config.loss = 'hinge'
 		config.output_activation = 'rbf'
-
-
 
 
 	def orient(self):
