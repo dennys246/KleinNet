@@ -10,10 +10,12 @@ from scipy.interpolate import InterpolatedUnivariateSpline as Interp
 
 class DataWrangler:
 
-	def __init__(self):
+	def __init__(self, bidsdir):
 		print("\nData Wrangler Initialized\nProcess PID - " + str(os.getpid()) + '\n')
 		os.chdir('../..')
 		print('Current working directory change to ' + os.getcwd() + '\n')
+		self.bidsdir = bidsdir
+
 
 	def run(self):
 		self.orient()

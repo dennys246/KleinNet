@@ -129,9 +129,9 @@ ID_len = 3
 # The data directory is the folder that holds all the data to be inputed into model.
 # Note that this data directory should include the folder parents up to the main
 # main BIDS formatted folder that holds all experiment data
-project_directory = 'Stroop_MRI/'
-result_directory = 'Scripts/'
-run_directory = 'Run_8'
+project_directory = '/Volumes/perlmansusan/Active/moochie/analysis/CARE/MRI_data/'
+result_directory = 'kleinnet/'
+run_directory = 'run_1'
 data_directory = 'BIDS/ds000164_R1.0.1-Data/'
 
 # Numpy Output Directory & Filenames - The DataWrangler generate a folder for each subject that

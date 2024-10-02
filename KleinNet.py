@@ -1,131 +1,80 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import os, shutil, nilearn, time, math, reader, time, csv, random, sklearn, config
+import os, shutil, time, time, random, config, csv, tqdm
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Ask tensorflow to not use GPU
-import SimpleITK as sitk
-import numpy as np
-from numpy import asarray
 import tensorflow as tf
-import nibabel as nib
-import plotly.graph_objects as go
-from nilearn import image, plotting, datasets, surface
-from nilearn.input_data import NiftiMasker
-from keras.utils import to_categorical
-from keras import models
-from keras.layers import Layer
-from keras.optimizers import SGD
-from sklearn.svm import SVC
-from sklearn.metrics import roc_curve, auc
+import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D # for 3d plotting
-from tensorflow.keras import Model
+import nibabel as nib
+import nibabel as nib
+from glob import glob
+from numpy import asarray
+from nilearn import plotting, datasets, surface
+from sklearn.metrics import roc_curve, auc
 from tensorflow.keras import backend as K
-from tensorflow.keras.layers import Dense, Flatten, Conv3D, LeakyReLU
+from tensorflow.keras.layers import LeakyReLU
 from random import randint, randrange
 
 class KleinNet:
-
 	def __init__(self):
+		self.config = configuration()
 		print("\n - KleinNet Initialized -\n - Process PID - " + str(os.getpid()) + ' -\n')
-		os.chdir('../..')
-		print('Current working directory change to ' + os.getcwd())
 		try:
-			os.chdir(config.result_directory + config.run_directory + "/Layer_1/")
-			os.chdir("../../..")
+			self.cwd = os.getcwd()
+			os.chdir(f"{self.config.run_directory}/Layer_1/")
+			os.chdir(self.cwd)
 		except:
 			self.create_dir()
 
-	def run(self):
-		self.wrangle()
-		self.build()
-		self.train()
-		self.test()
-		self.plot_accuracy()
-		for output in config.outputs:
-			self.observe(output)
+	def orient(self, bids_dir, bold_identifier, label_identifier):
+		# Attach orientation variables to object for future use
+		self.bids_dir = bids_dir
+		self.bold_identifier = bold_identifier
+		self.label_identifier = label_identifier
 
-	def optimize(self):
-		alpha_opt = [0.1, 0.01, 0.001, 0.0001]
-		learning_rate_opt = [0.001, 1e-4, 1e-5, 1e-6]
-		bias_opt = [0, 0.5, 1, 2]
-		momentum_opt = [0, 0.001, 0.01, 0.1]
-		epsilon_opt = [1e-5, 1e-6, 1e-7, 1e-8]
-		index = 1
-		for config.alpha in alpha_opt:
-			for config.learning_rate in learning_rate_opt:
-				for config.bias in bias_opt:
-					for config.optimizer in config.optimizers:
-						for config.epsilon, config.momentum in epsilon_opt, momentum_opt:
-							self.build()
-							self.train()
-							self.test()
-							self.plot_accuracy(index)
-							index += 1
+		print(f"\nOrienting and generating KleinNet lexicons for bids directory {bids_dir}...")
+		# Grab all available subjects with fMRIPrep data
+		self.subject_pool = []
+		self.subject_folders = [item for item in glob(f"{bids_dir}/derivatives/{self.config.tool}/sub-*") if os.path.isdir(item)]
+		for subject in self.subject_folders:
+			subject_id = subject.split('/')[-1]
+			# Grab all available sessions
 
-	def jack_knife(self, Range = None):
-		if Range == None:
-			Range = range(1, config.subject_count)
-		for self.jackknife in Range:
-			print("Running Jack-Knife on Subject " + str(self.jackknife))
-			self.wrangle(range(config.subject_count), self.jackknife)
-			self.build()
-			self.train()
-			self.plot_accuracy()
-			self.ROC()
+			sessions = glob(f"{subject}/ses-*/")
+			if len(sessions) == 0:
+				print(f"No sessions found for {subject_id}")
+			for session in sessions:
+				# Look if the subject has usable bold file
+				bold_filename = glob(f"{session}/func/{bold_identifier}")
+				if len(bold_filename) == 0:
+					continue
+				if len(bold_filename) > 1:
+					print(f"Multiple bold files found for {subject_id}...\n{'\n'.join(bold_filename)}")
+					continue
 
-	def ROC(self):
-		self.probabilities = self.model.predict(self.x_test).ravel()
-		np.save(config.result_directory + config.run_directory + '/Jack_Knife/Probabilities/Sub-' + str(self.jackknife) + '_Volumes_Prob.np', self.probabilities)
-		fpr, tpr, threshold = roc_curve(self.y_test, self.probabilities)
-		predictions = np.argmax(self.probabilities, axis=-1)
-		AUC = auc(fpr, tpr)
-		plt.figure()
-		plt.plot([0, 1], [0, 1], 'k--')
-		plt.plot(fpr, tpr, label = 'RF (area = {:.3f})'.format(AUC))
-		plt.xlabel('False Positive Rate')
-		plt.ylabel('True Positive Rate')
-		plt.title('Subject ' + str(self.jackknife) + ' ROC Curve')
-		plt.legend(loc = 'best')
-		plt.savefig(config.result_directory + config.run_directory + "/Jack_Knife/Sub_" + str(self.jackknife) + "_ROC_Curve.png")
-		plt.close()
+				# Look if the subject has labels (regressors/classifiers)
+				label_filename = glob(f"{session}/func/{label_identifier}")
+				if len(label_filename) == 0:
+					print(f"No labels found for {subject_id}, excluding from analysis...")
+					continue
+				if len(label_filename) > 1:
+					print(f"Multiple label files found for {subject_id}...\n{'\n'.join(label_filename)}")
+					continue
 
+				self.subject_pool.append(subject_id)
 
-	def SVM(self):
-		config.loss = 'hinge'
-		config.output_activation = 'rbf'
+		print(f"Subject pool available for use...\n{'\n'.join(self.subject_pool)}")
 
-
-	def orient(self):
-		print("\nOrienting and generating KleinNet lexicons")
-		self.subject_IDs = ["sub-" + '0'*(config.ID_len - len(str(ind))) + str(ind) for ind in range(1, config.subject_count + 1)]
-		self.numpy_folders = [config.data_directory  + subject_ID + '/' + config.numpy_output_dir + '/' for subject_ID in self.subject_IDs]
-		self.volumes_filenames = [subject + "_volumes.npy" for subject in self.subject_IDs]
-		self.labels_filenames = [subject + "_labels.npy" for subject in self.subject_IDs]
-		self.header_filenames = [subject + "_headers.npy" for subject in self.subject_IDs]
-		self.affines_filenames = [subject + "_affines.npy" for subject in self.subject_IDs]
-		self.anat_folders = [config.data_directory + subject_ID + '/anat/' for subject_ID in self.subject_IDs]
-		self.anat_filenames = [subject_ID + "_T1w.nii" for subject_ID in self.subject_IDs]
-
-	def wrangle(self, subject_range = range(config.subject_count), jackknife = None):
-		try:
-			self.numpy_folders
-		except:
-			self.orient()
-		self.progress_bar(0, (config.subject_count - 1), prefix = 'Wrangling Data', suffix = 'Complete', length = 40)
-		for subject_index in subject_range:
-			if subject_index != jackknife:
-				image = np.load(self.numpy_folders[subject_index] + self.volumes_filenames[subject_index]) # Load data
-				if config.wumbo == False:
-					label = np.load(self.numpy_folders[subject_index] + self.labels_filenames[subject_index])
-				else:
-					label = np.random.randint(2, size = image.shape[0])
+	def wrangle(self, subjects = None, jackknife = None):
+		# Run through each subject and load data
+		for subject in subjects:
+			if subject != jackknife:
+				image, label = self.load_subject(subject)
 				try:
 					images = np.append(images, image, axis = 0)
 					labels = np.append(labels, label)
 				except:
 					images = image
 					labels = label
-			self.progress_bar(subject_index, (config.subject_count - 1), prefix = 'Wrangling Data', suffix = 'Complete', length = 40)
-		print("\n")
 		if config.shuffle == True:
 			images, labels = self.shuffle(images, labels)
 		if jackknife == None:
@@ -136,15 +85,43 @@ class KleinNet:
 		else:
 			self.x_train = images
 			self.y_train = labels
-			self.x_test = np.load(self.numpy_folders[jackknife - 1] + self.volumes_filenames[jackknife - 1])
-			self.y_test = np.load(self.numpy_folders[jackknife - 1] + self.labels_filenames[jackknife - 1])
+			self.x_test, self.y_test = self.load_subject(jackknife)
 
+	def load_subject(self, subject, session = '*'):
+			image_filename = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.bold_identifier}")[0]
+			image_file = nib.load(image_filename) # Load images
 
-	def wrangle_subject(subject):
-		self.images = np.load(self.numpy_folders[subject - 1] + self.volumes_filenames[subject - 1])
-		self.labels = np.load(self.numpy_folders[subject - 1] + self.labels_filenames[subject - 1])
-		self.header = np.load(self.numpy_folders[subject - 1] + self.header_filenames[subject - 1])
-		self.anatomy = np.load(self.anat_folders[subject - 1] + self.anat_filenames[subject - 1])
+			header = image_file.header # Grab images header
+
+			# Grab image shape and affine from header
+			image_shape = header.get_data_shape() 
+
+			# Reshape image to have time dimension as first dimension and add channel dimension
+			image = image_file.get_fdata().reshape(image_shape[3], image_shape[0], image_shape[1], image_shape[2], 1)
+			
+			# Grab fMRI affine transformation matrix
+			affine = image_file.affine 
+
+			# Load labels
+			label_filename = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.label_identifier}")[0]
+			labels = []
+			with open(label_filename, 'r') as label_file:
+				if label_filename[-4:] == '.txt':
+					labels = label_file.readlines()
+					labels = ''.join(labels).split('\n')
+				if label_filename[-4:] == '.csv':
+					labels = []
+					csv_reader = csv.reader(label_filename)
+					for row in csv_reader:
+						labels.append(row)
+				if label_filename[-4:] == '.tsv':
+					tsv_reader = csv.reader(label_filename, '\t')
+					for row in tsv_reader:
+						labels.append(row)
+				labels = np.array(labels)
+			
+			return image, labels
+
 
 	def shuffle(self, images, labels):
 		indices = np.arange(images.shape[0])
@@ -204,12 +181,6 @@ class KleinNet:
 	def calcUpSample(self, shape):
 		return [round((input_length - 1)*(filter_length/stride)*2) for input_length, filter_length, stride in zip(shape, config.pool_size, config.pool_stride)]
 
-	def optimum_bias(self):
-		if correct < incorrect:
-			return math.log((config.correct/config.incorrect), (2.78))
-		else:
-			return math.log((config.incorrect/config.correct), (2.78))
-
 	def build(self):
 		try:
 			self.filter_counts
@@ -234,10 +205,8 @@ class KleinNet:
 			self.model.add(LeakyReLU(alpha = config.alpha))
 			if dense_dropout == True:
 				self.model.add(tf.keras.layers.Dropout(config.dropout))
-		if config.output_activation != 'rbf':
-			self.model.add(tf.keras.layers.Dense(1, activation=config.output_activation)) #Create output layer
-		else:
-			self.model.add(RBFLayer(1, 0.5))
+		self.model.add(tf.keras.layers.Dense(1, activation=self.config.output_activation)) #Create output layer
+
 		self.model.build()
 		self.model.summary()
 
@@ -280,7 +249,7 @@ class KleinNet:
 		try:
 			self.images
 		except:
-			self.wrangle(subject_range = [1])
+			self.wrangle(self.subject_pool[0])
 		self.sample_label = -1
 		while self.sample_label != interest: # Grab next sample that is the other category
 			self.sample_label = self.labels[random.randint(self.images.shape[0])] # Grab sample label
@@ -307,16 +276,14 @@ class KleinNet:
 			self.feature_maps, predictions = activation_model.predict(sample) # Grab feature map using single volume
 			self.feature_maps = self.feature_maps[0, :, :, : ,:].reshape(self.current_shape[0], self.current_shape[1], self.current_shape[2], self.current_shape[3])
 
-			self.progress_bar(0, self.feature_maps.shape[3] - 1, prefix = 'Extracting Layer ' + str(self.layer) + ' Features', suffix = 'Complete', length = 40)
 			for self.map_index in range(self.feature_maps.shape[3]): # Save feature maps in glass brain visualization pictures
 				feature_map = (self.feature_maps[:, :, :, map_index].reshape(self.current_shape[0], self.current_shape[1], self.current_shape[2])) # Grab Feature map
 				deconv_feature_map = self.deconv_model.predict(self.feature_maps[:, :, :, map_index].reshape(1, self.current_shape[0], self.current_shape[1], self.current_shape[2], 1)).reshape(self.new_shape[0], self.new_shape[1], self.new_shape[2])
 				self.plot_all(heatmap, 'DeConv_Feature_Maps', map_index)
-				self.progress_bar(map_index, self.feature_maps.shape[3] - 1, prefix = 'Extracting Layer ' + str(self.layer) + ' Features', suffix = 'Complete', length = 40)
 
 			print("\n\nExtracting KleinNet model class activation maps for layer " + self.layer)
 			with tf.GradientTape() as gtape: # Create CAM
-				conv_output, predictions = activation_model(sample)
+				conv_output, predictions = self.activation_model(sample)
 				loss = predictions[:, np.argmax(predictions[0])]
 				grads = gtape.gradient(loss, conv_output)
 				pooled_grads = K.mean(grads, axis = (0, 1, 2, 3))
@@ -329,7 +296,7 @@ class KleinNet:
 			self.heatmap /= max_heat
 
 			# Deconvolute heatmaps and visualize
-			self.heatmap = deconv_model.predict(self.heatmap.reshape(1, self.current_shape[0], self.current_shape[1], self.current_shape[2], 1)).reshape(self.new_shape[0], self.new_shape[1], self.new_shape[2])
+			self.heatmap = self.deconv_model.predict(self.heatmap.reshape(1, self.current_shape[0], self.current_shape[1], self.current_shape[2], 1)).reshape(self.new_shape[0], self.new_shape[1], self.new_shape[2])
 			self.plot_all(self.heatmap, 'CAM', 1)
 
 	def plot_all(self, data, data_type, map_index):
@@ -354,7 +321,6 @@ class KleinNet:
 		data, title, threshold, output_folder = self.prepare_plots(data, data_type, map_index, "Glass_Brain")
 		plotting.plot_glass_brain(stat_map_img = data, black_bg = True, plot_abs = False, display_mode = 'lzry', title = title, threshold = threshold, annotate = True, output_file = (output_folder + 'feature_' + str(map_index) + '-' + self.category + '_category.png')) # Plot feature map using nilearn glass brain - Original threshold = (mean_value + (std_value*2))
 
-
 	def stat_maps(self, data, data_type, map_index):
 		data, title, threshold, output_folder = self.prepare_plots(data, data_type, map_index, "Stat_Maps")
 		for display, midfix, cut_coord in zip(['z', 'x', 'y'], ['-zview-', '-xview-', '-yview-'], [6, 6, 6]):
@@ -373,65 +339,181 @@ class KleinNet:
 		plotting.plot_surf_stat_map(fsaverage.infl_right, texture, hemi = 'right', view = 'medial', title = title, colorbar = True, threshold = threshold, bg_map = fsaverage.sulc_right, bg_on_data = True, cmap='Spectral', output_file = (output_folder + 'feature_' + str(map_index) + '-right-medial-' + self.category + '_category.png'))
 
 
-	def create_dir(self):
-		first_dir = config.outputs_category # Create lists of all directory levels for extraction outputs
-		second_dir = ['Layer_' + str(layer) for layer in range(1, config.convolution_depth*2 + 1)]
+	def jack_knife(self, Range = None):
+		for self.jackknife in self.subject_pool:
+			print("Running Jack-Knife on Subject " + str(self.jackknife))
+			self.wrangle(self.subject_pool, self.jackknife)
+			self.build()
+			self.train()
+			self.plot_accuracy()
+			self.ROC()
+
+	def ROC(self):
+		self.probabilities = self.model.predict(self.x_test).ravel()
+		np.save(self.config.result_directory + self.config.run_directory + '/Jack_Knife/Probabilities/Sub-' + str(self.jackknife) + '_Volumes_Prob.np', self.probabilities)
+		fpr, tpr, threshold = roc_curve(self.y_test, self.probabilities)
+		predictions = np.argmax(self.probabilities, axis=-1)
+		AUC = auc(fpr, tpr)
+		plt.figure()
+		plt.plot([0, 1], [0, 1], 'k--')
+		plt.plot(fpr, tpr, label = 'RF (area = {:.3f})'.format(AUC))
+		plt.xlabel('False Positive Rate')
+		plt.ylabel('True Positive Rate')
+		plt.title('Subject ' + str(self.jackknife) + ' ROC Curve')
+		plt.legend(loc = 'best')
+		plt.savefig(self.config.result_directory + self.config.run_directory + "/Jack_Knife/Sub_" + str(self.jackknife) + "_ROC_Curve.png")
+		plt.close()
+
+	def create_dir(self, cleandir = True):
+		first_dir = self.config.outputs_category # Create lists of all directory levels for extraction outputs
+		second_dir = ['Layer_' + str(layer) for layer in range(1, self.config.convolution_depth*2 + 1)]
 		third_dir = ["DeConv_Feature_Maps", "DeConv_CAM"]
 		fourth_dir = ["GB", "SM", "SSM"]
 		try:
-			os.chdir(config.result_directory + config.run_directory + '/')
+			os.chdir(self.config.result_directory + self.config.run_directory + '/')
 			os.chdir('../..')
-			print('\nRun directory ' + config.result_directory + config.run_directory + ' currently exists, a clean run directory is needed for KleinNet to output results correctly, would you like to remove and replace the current run directory? (yes or no)')
-			response = input()
+			print('\nRun directory ' + self.config.result_directory + self.config.run_directory + ' currently exists, a clean run directory is needed for KleinNet to output results correctly, would you like to remove and replace the current run directory? (yes or no)')
+			response = 'yes'#input()
 			if response == 'yes':
-				shutil.rmtree(config.result_directory + config.run_directory)
+				shutil.rmtree(self.config.result_directory + self.config.run_directory)
 				time.sleep(1)
 			else:
 				return
 		except:
 			print('\nGenerating run directory')
-		os.mkdir(config.result_directory + config.run_directory + '/')
-		os.mkdir(config.result_directory + config.run_directory + "/Model_Description")
-		os.mkdir(config.result_directory + config.run_directory + '/SVM')
-		os.mkdir(config.result_directory + config.run_directory + '/Jack_Knife')
-		os.mkdir(config.result_directory + config.run_directory + '/Jack_Knife/Probabilities')
+		os.mkdir(self.config.result_directory + self.config.run_directory + '/')
+		os.mkdir(self.config.result_directory + self.config.run_directory + "/Model_Description")
+		os.mkdir(self.config.result_directory + self.config.run_directory + '/SVM')
+		os.mkdir(self.config.result_directory + self.config.run_directory + '/Jack_Knife')
+		os.mkdir(self.config.result_directory + self.config.run_directory + '/Jack_Knife/Probabilities')
 		for first in first_dir:
-			os.mkdir(config.result_directory + config.run_directory + "/" + first)
+			os.mkdir(self.config.result_directory + self.config.run_directory + "/" + first)
 			for second in second_dir:
-				os.mkdir(config.result_directory + config.run_directory + "/" + first + "/" + second)
+				os.mkdir(self.config.result_directory + self.config.run_directory + "/" + first + "/" + second)
 				for third in third_dir:
-					os.mkdir(config.result_directory + config.run_directory + "/" + first + "/" + second + "/" + third)
+					os.mkdir(self.config.result_directory + self.config.run_directory + "/" + first + "/" + second + "/" + third)
 					for fourth in fourth_dir:
-						os.mkdir(config.result_directory + config.run_directory + "/" + first + "/" + second + "/" + third + "/" + fourth)
-		print('\nResult directories generated for ' + config.run_directory + '\n')
+						os.mkdir(self.config.result_directory + self.config.run_directory + "/" + first + "/" + second + "/" + third + "/" + fourth)
+		print('\nResult directories generated for ' + self.config.run_directory + '\n')
 
 
-	def progress_bar(self, iteration, total, prefix = '', suffix = '', decimals = 1, length = 100, fill = '█', printEnd = "\r"):
-		percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
-		filledLength = int(length * iteration // total)
-		bar = fill * filledLength + '-' * (length - filledLength)
-		print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = printEnd)
-		if iteration == total:
-		    print()
+class configuration:
 
-	class RBFLayer(Layer):
-	    def __init__(self, units, gamma, **kwargs):
-	        super(RBFLayer, self).__init__(**kwargs)
-	        self.units = units
-	        self.gamma = K.cast_to_floatx(gamma)
+	def __init__(self):
+		self.build() # Build configuration
 
-	    def build(self, input_shape):
-	        self.mu = self.add_weight(name='mu',
-	                                  shape=(int(input_shape[1]), self.units),
-	                                  initializer='uniform',
-	                                  trainable=True)
-	        super(RBFLayer, self).build(input_shape)
+	def build(self):
+		#-------------------------------- Shuffle Data ------------------------------##
+		# Shuffle will zip all images and labels and shuffle the data before assigning
+		# them to training and testing sets. Defaults to true, however you might want
+		# to change this to false if you think your question has a time dimension to it
+		self.shuffle = True
 
-	    def call(self, inputs):
-	        diff = K.expand_dims(inputs) - self.mu
-	        l2 = K.sum(K.pow(diff,2), axis=1)
-	        res = K.exp(-1 * self.gamma * l2)
-	        return res
+		#------------------------------- Run parameters ------------------------------#
+		# Epoch and Batch Size - Both used to describe how the model will run, and
+		# for how long. Epochs represents how many times the data will be presented to
+		# the model for deep learning. The batch size simply defines how the model will
+		# batch the samples into miniature training samples to help plot model performance.
+		self.epochs = 100
+		self.batch_size = 20
 
-	    def compute_output_shape(self, input_shape):
-	        return (input_shape[0], self.units)
+		#---------------------------- Model Hyperparameters ---------------------------#
+		# Model Hyperparameters - Hyperparameters used within the models algorithms to
+		# to learn about the dataset. These values were found while optimizing the model
+		# over a simple stroop dataset so consider using the optiimize function within
+		# the KleinNet library to find optimum values. Bias can be a bit tricky to optimize
+		# and I would recommend using the KleinNet.optimum_bias() to find bias when using
+		# an inbalanced dataset. Hyperparameter descriptors to be added with GUI.
+		self.alpha = 0.1
+		self.epsilon = 1e-6
+		self.learning_rate = 0.0001
+		self.bias = 0
+		self.dropout = 0.3
+		self.momentum = 0
+
+		#-------------------------------- Model Set-Up -------------------------------#
+
+		# The Kernel initializer - is used to initialize the state of the model. We initialize
+		# the model (e.g. weights, biases, etc.) using Xavier (glorot) uniform which randomly selects
+		# values from a uniform gaussian distribution. I found this initializer to be superior to others
+		# at the time of building the model however you can change the initializer by typing
+		# in the tensorflow string code for the initializer here (e.g. 'glorot_uniform')
+		self.kernel_initializer = 'glorot_uniform'
+
+		# Convolution Depth - KleinNet is built to use a basic convolution layer structure
+		# that is stacked based on how deep the model is indicated her. Having the depth
+		# set at 2 meaning will cause the model to build 2 convolutions layers from
+		# the convolution template in the KleinNet.build() function before building the top density
+		self.convolution_depth = 2
+
+		# Initial Filter Count - KleinNet convolution layer filter sizes are calculated
+		# within the KleinNet.plan() function using a common machine learning rule of
+		# doubling filter count per convolution layer. init_filter_count is the initial
+		# value the filters starts on before doubling.
+		self.init_filter_count = 1
+
+		# Kernel Size & Stride  - These variables are used to decide what the convolution
+		# kernel size will be along with how it moves across the layer to generate Features.
+		# Generally the bigger the kernel stride, the small the output which... could be a good thing?
+		self.kernel_size = (2, 2, 2)
+		self.kernel_stride = (1, 1, 1)
+
+		# Zero Padding - Padding is used to decide if 0's will be added onto the edge of
+		# the input to make sure the convolutions don't move outside of the model and crash
+		# your script. 'valid' padding means no 0's will be added to the side were 'same'
+		# padding means 0's will be added to the edges of the layer input. The padding
+		# variable declares, if using same padding, the size of the padding to add on the the edges
+		self.zero_padding = 'valid'
+		self.padding = (0, 0, 0)
+
+		# Max Pooling - Max pooling is used to generally reduce the size of the input.
+		# These layers will general a pool kernel of size pool_size and move throughout the layers input
+		# based on pool_stride. The max pooling layer finds the max value within the kernel's
+		# area and pools it all into a smaller space.
+		self.pool_size = (2, 2, 2)
+		self.pool_stride = (2, 2, 2)
+
+		# Top Density Layer(s) - The following variables are used to define the structure
+		# of the top density. The top_density variable holds the sizes of each layer were
+		# the density_dropout layer defines whether there is dropout moving into that layer.
+		# You might notice that the density_dropout variables hold an extra value conpared
+		# to the top_density variable and this is to account for the flattening layer that
+		# is automatically built within the KleinNet.build() function. The first value of
+		# density_dropout[0] corresponds to dropout applied to the flatterning layer.
+		self.top_density = [40, 11, 10]
+		self.density_dropout = [True, False, False, False]
+
+
+		# Outputs - The output variables are used to help the model process and understand what it
+		# is classifying and help it display some of the output better. These variables are
+		# also used within KleinNet.build() to create the output layer. The output activation
+		# is used to decide what activation the model will us in it's output layer.
+		self.output_activation = 'sigmoid'
+		self.outputs = [0, 1]
+		self.outputs_category = ['Negative', 'Positive']
+
+		# Optimizers - This section is used to help switch between different Optimizers
+		# without having to worry about changing code too much. While talking about
+		# SGD/Adam and Nestrov/AMSGrad is not within the scope of this config file I
+		# would recommend looking up literature to find which would be best for you.
+		self.optimizers = ['SGD', 'Adam']
+		self.optimizer = 'SGD' # Set to either 'SGD' or 'Adam'
+		self.use_nestrov = True # If using SDG optimizer
+		self.use_amsgrad = True # If using Adam optimizer
+
+		# Loss - This variable describes the loss calculation used within the model.
+		# the standard used while initially building KleinNet was binary crossentropy
+		# however you may need to change this based on the questions you are asking.
+		self.loss = 'binary_crossentropy'
+
+		# Folder Structure - These variables are used to desribes where data is stored
+		# along with where to store the outputs of KleinNet. The results directory is
+		# a general folder where specific model run folder will be created. The run
+		# directory is the specific folder KleinNet will generate and output results into.
+		# The data directory is the folder that holds all the data to be inputed into model.
+		# Note that this data directory should include the folder parents up to the main
+		# main BIDS formatted folder that holds all experiment data
+		self.result_directory = 'kleinnet/'
+		self.run_directory = 'run_1'
+
+		self.tool = 'fmriprep'
