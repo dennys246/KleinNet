@@ -4,3 +4,7 @@ KleinNet copy.py
 main.py
 config.py
 DataWrangler.py
+pre_kleinnet_bsub.sh
+kleinnet_bsub.sh
+logs/*
+kleinnet/*

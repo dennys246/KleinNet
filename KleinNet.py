@@ -1,5 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import os, shutil, time, time, random, config, csv, tqdm
+import os, shutil, time, time, random, csv, tqdm, atexit	
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Ask tensorflow to not use GPU
 import tensorflow as tf
 import numpy as np
@@ -17,13 +17,10 @@ from random import randint, randrange
 class KleinNet:
 	def __init__(self):
 		self.config = configuration()
+		self.model = None # Initialize model variable
+		atexit.register(self.save)
+
 		print("\n - KleinNet Initialized -\n - Process PID - " + str(os.getpid()) + ' -\n')
-		try:
-			self.cwd = os.getcwd()
-			os.chdir(f"{self.config.run_directory}/Layer_1/")
-			os.chdir(self.cwd)
-		except:
-			self.create_dir()
 
 	def orient(self, bids_dir, bold_identifier, label_identifier):
 		# Attach orientation variables to object for future use
@@ -48,7 +45,8 @@ class KleinNet:
 				if len(bold_filename) == 0:
 					continue
 				if len(bold_filename) > 1:
-					print(f"Multiple bold files found for {subject_id}...\n{'\n'.join(bold_filename)}")
+					bold_filename = '\n'.join(bold_filename)
+					print(f"Multiple bold files found for {subject_id}...\n{bold_filename}")
 					continue
 
 				# Look if the subject has labels (regressors/classifiers)
@@ -57,26 +55,26 @@ class KleinNet:
 					print(f"No labels found for {subject_id}, excluding from analysis...")
 					continue
 				if len(label_filename) > 1:
-					print(f"Multiple label files found for {subject_id}...\n{'\n'.join(label_filename)}")
+					label_filename = '\n'.join(label_filename)
+					print(f"Multiple label files found for {subject_id}...\n{label_filename}")
 					continue
 
 				self.subject_pool.append(subject_id)
 
-		print(f"Subject pool available for use...\n{'\n'.join(self.subject_pool)}")
+		subject_pool = '\n'.join(self.subject_pool)
+		print(f"Subject pool available for use...\n{subject_pool}")
 
-	def wrangle(self, subjects = None, jackknife = None):
+	def wrangle(self, subjects = None, session = '*', activation = 'linear', shuffle = False, jackknife = None):
 		# Run through each subject and load data
 		for subject in subjects:
 			if subject != jackknife:
-				image, label = self.load_subject(subject)
+				image, label = self.load_subject(subject, session, activation, shuffle)
 				try:
 					images = np.append(images, image, axis = 0)
 					labels = np.append(labels, label)
 				except:
 					images = image
 					labels = label
-		if config.shuffle == True:
-			images, labels = self.shuffle(images, labels)
 		if jackknife == None:
 			self.x_train = images[:(round((images.shape[0]/3)*2)),:,:,:]
 			self.y_train = labels[:(round((len(labels)/3)*2))]
@@ -85,9 +83,9 @@ class KleinNet:
 		else:
 			self.x_train = images
 			self.y_train = labels
-			self.x_test, self.y_test = self.load_subject(jackknife)
+			self.x_test, self.y_test = self.load_subject(jackknife, session, activation, shuffle)
 
-	def load_subject(self, subject, session = '*'):
+	def load_subject(self, subject, session = '*', activation = 'linear', shuffle = False, load_affine = False, load_header = False):
 			image_filename = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.bold_identifier}")[0]
 			image_file = nib.load(image_filename) # Load images
 
@@ -95,6 +93,8 @@ class KleinNet:
 
 			# Grab image shape and affine from header
 			image_shape = header.get_data_shape() 
+			if self.config.data_shape == None:
+				self.config.data_shape = image_shape[:-1]
 
 			# Reshape image to have time dimension as first dimension and add channel dimension
 			image = image_file.get_fdata().reshape(image_shape[3], image_shape[0], image_shape[1], image_shape[2], 1)
@@ -108,20 +108,32 @@ class KleinNet:
 			with open(label_filename, 'r') as label_file:
 				if label_filename[-4:] == '.txt':
 					labels = label_file.readlines()
-					labels = ''.join(labels).split('\n')
+					labels = [float(label) for label in ''.join(labels).split('\n') if label != '']
 				if label_filename[-4:] == '.csv':
 					labels = []
 					csv_reader = csv.reader(label_filename)
 					for row in csv_reader:
-						labels.append(row)
+						labels.append(float(row))
 				if label_filename[-4:] == '.tsv':
 					tsv_reader = csv.reader(label_filename, '\t')
 					for row in tsv_reader:
-						labels.append(row)
+						labels.append(float(row))
 				labels = np.array(labels)
-			
-			return image, labels
 
+			if activation != 'linear': # If not a regression problem
+				labels = [int(label) for label in labels] # Convert labels to integers for classifing
+			
+			if self.config.shuffle == True or shuffle == True:
+				image, labels = self.shuffle(image, labels)
+
+			if load_affine == False and load_header == False:
+				return image, labels
+			elif load_header == False and load_affine == True:
+				return image, labels, affine
+			elif load_header == True and load_affine == False:
+				return image, labels, header
+			elif load_header == True and load_affine == True:
+				return image, labels, header, affine
 
 	def shuffle(self, images, labels):
 		indices = np.arange(images.shape[0])
@@ -129,20 +141,35 @@ class KleinNet:
 		images = images[indices, :, :, :, :]
 		labels = labels[indices]
 		return images, labels
+	
+	def mean_filter(image, filter_size):
+		return
+	
+	def median_filter(image, filter_size):
+		return
+
+	def gaussian_filter(image, filter_size, sigma = 1):
+		return
+	
+	def bilateral_filter(image, filter_size):
+		return
+	
+	def laplacian_filter(image, filter_size, sign = 'positive'):
+		return
 
 	def plan(self):
 		print("\nPlanning KleinNet model structure")
 		self.filter_counts = []
-		convolution_size = config.init_filter_count
-		for depth in range(config.convolution_depth*2):
+		convolution_size = self.config.init_filter_count
+		for depth in range(self.config.convolution_depth*2):
 			self.filter_counts.append(convolution_size)
 			convolution_size = convolution_size*2
 
 		self.layer_shapes = []
 		self.output_layers = []
-		conv_shape = [config.x_size, config.y_size, config.z_size]
+		conv_shape = [self.config.data_shape[0], self.config.data_shape[1], self.config.data_shape[2]]
 		conv_layer = 1
-		for depth in range(config.convolution_depth):
+		for depth in range(self.config.convolution_depth):
 			conv_shape = self.calcConv(conv_shape)
 			self.layer_shapes.append(conv_shape)
 			self.output_layers.append(conv_layer)
@@ -151,7 +178,7 @@ class KleinNet:
 			self.layer_shapes.append(conv_shape)
 			self.output_layers.append(conv_layer)
 			conv_layer += 4
-			if depth < config.convolution_depth - 1:
+			if depth < self.config.convolution_depth - 1:
 				conv_shape = self.calcMaxPool(conv_shape)
 
 		self.new_shapes = []
@@ -164,126 +191,164 @@ class KleinNet:
 			self.new_shapes.append(new_shape)
 
 		for layer, plan in enumerate(zip(self.output_layers, self.filter_counts, self.layer_shapes, self.new_shapes)):
-			print("Layer ", layer + 1, " (", plan[0], ")| Filter count:", plan[1], "| Layer Shape: ", plan[2], "| Deconvolution Output: ", plan[3])
+			print(f"Layer {layer + 1} ({plan[0]}) | Filter count: {plan[1]} | Layer Shape: {plan[2]} | Deconvolution Output: {plan[3]}")
 
 	def calcConv(self, shape):
-		return [(input_length - filter_length + (2*pad))//stride + 1 for input_length, filter_length, stride, pad in zip(shape, config.kernel_size, config.kernel_stride, config.padding)]
+		return [(input_length - filter_length + (2*pad))//stride + 1 for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
 
 	def calcMaxPool(self, shape):
-		return [(input_length - pool_length + (2*pad))//stride + 1 for input_length, pool_length, stride, pad in zip(shape, config.pool_size, config.pool_stride, config.padding)]
+		return [(input_length - pool_length + (2*pad))//stride + 1 for input_length, pool_length, stride, pad in zip(shape, self.config.pool_size, self.config.pool_stride, self.config.padding)]
 
 	def calcConvTrans(self, shape):
-		if config.zero_padding == 'valid':
-			return [round((input_length - 1)*stride + filter_length) for input_length, filter_length, stride in zip(shape, config.kernel_size, config.kernel_stride)]
+		if self.config.zero_padding == 'valid':
+			return [round((input_length - 1)*stride + filter_length) for input_length, filter_length, stride in zip(shape, self.config.kernel_size, self.config.kernel_stride)]
 		else:
-			return [round(input_length*stride) for input_length, filter_length, stride in zip(shape, config.kernel_size, config.kernel_stride)]
+			return [round(input_length*stride) for input_length, filter_length, stride in zip(shape, self.config.kernel_size, self.config.kernel_stride)]
 
 	def calcUpSample(self, shape):
-		return [round((input_length - 1)*(filter_length/stride)*2) for input_length, filter_length, stride in zip(shape, config.pool_size, config.pool_stride)]
+		return [round((input_length - 1)*(filter_length/stride)*2) for input_length, filter_length, stride in zip(shape, self.config.pool_size, self.config.pool_stride)]
 
-	def build(self):
-		try:
-			self.filter_counts
-		except:
-			self.plan()
+	def build(self, load = False):
+		# Plan out model structure
+		if self.config.data_shape == None:
+			self.wrangle(self.subject_pool[0:1])
+
+		self.plan()
+
+		self.checkpoint_path = f"{self.config.result_directory}{self.config.run_directory}/KleinNet/ckpt.weights.h5"
+
 		print('\nConstructing KleinNet model')
 		self.model = tf.keras.models.Sequential() # Create first convolutional layer
-		for layer in range(1, config.convolution_depth + 1): # Build the layer on convolutions based on config convolution depth indicated
-			self.model.add(tf.keras.layers.Conv3D(self.filter_counts[layer*2 - 2], config.kernel_size, strides = config.kernel_stride, padding = config.zero_padding, input_shape = (config.x_size, config.y_size, config.z_size, 1), use_bias = True, kernel_initializer = config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(config.bias)))
-			self.model.add(LeakyReLU(alpha = config.alpha))
+		for layer in range(1, self.config.convolution_depth + 1): # Build the layer on convolutions based on config convolution depth indicated
+			self.model.add(tf.keras.layers.Conv3D(self.filter_counts[layer*2 - 2], self.config.kernel_size, strides = self.config.kernel_stride, padding = self.config.zero_padding, input_shape = (self.config.data_shape[0], self.config.data_shape[1], self.config.data_shape[2], 1), use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias)))
+			self.model.add(LeakyReLU(alpha = self.config.alpha))
 			self.model.add(tf.keras.layers.BatchNormalization())
-			self.model.add(tf.keras.layers.Conv3D(self.filter_counts[layer*2 - 1], config.kernel_size, strides = config.kernel_stride, padding = config.zero_padding, use_bias = True, kernel_initializer = config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(config.bias)))
-			self.model.add(LeakyReLU(alpha = config.alpha))
+			self.model.add(tf.keras.layers.Conv3D(self.filter_counts[layer*2 - 1], self.config.kernel_size, strides = self.config.kernel_stride, padding = self.config.zero_padding, use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias)))
+			self.model.add(LeakyReLU(alpha = self.config.alpha))
 			self.model.add(tf.keras.layers.BatchNormalization())
-			if layer < config.convolution_depth:
-				self.model.add(tf.keras.layers.MaxPooling3D(pool_size = config.pool_size, strides = config.pool_stride, padding = config.zero_padding, data_format = "channels_last"))
-		if config.density_dropout[0] == True: # Add dropout between convolution and density layer
-			self.model.add(tf.keras.layers.Dropout(config.dropout))
+			if layer < self.config.convolution_depth:
+				self.model.add(tf.keras.layers.MaxPooling3D(pool_size = self.config.pool_size, strides = self.config.pool_stride, padding = self.config.zero_padding, data_format = "channels_last"))
+		if self.config.density_dropout[0] == True: # Add dropout between convolution and density layer
+			self.model.add(tf.keras.layers.Dropout(self.config.dropout))
 		self.model.add(tf.keras.layers.Flatten()) # Create heavy top density layers
-		for density, dense_dropout in zip(config.top_density, config.density_dropout[1:]):
-			self.model.add(tf.keras.layers.Dense(density, use_bias = True, kernel_initializer = config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(config.bias))) # Density layer based on population size of V1 based on Full-density multi-scale account of structure and dynamics of macaque visual cortex by Albada et al.
-			self.model.add(LeakyReLU(alpha = config.alpha))
+		for density, dense_dropout in zip(self.config.top_density, self.config.density_dropout[1:]):
+			self.model.add(tf.keras.layers.Dense(density, use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias))) # Density layer based on population size of V1 based on Full-density multi-scale account of structure and dynamics of macaque visual cortex by Albada et al.
+			self.model.add(LeakyReLU(alpha = self.config.alpha))
 			if dense_dropout == True:
-				self.model.add(tf.keras.layers.Dropout(config.dropout))
+				self.model.add(tf.keras.layers.Dropout(self.config.dropout))
 		self.model.add(tf.keras.layers.Dense(1, activation=self.config.output_activation)) #Create output layer
 
 		self.model.build()
 		self.model.summary()
 
-		if config.optimizer == 'Adam':
-			optimizer = tf.keras.optimizers.Adam(learning_rate = config.learning_rate, epsilon = config.epsilon, amsgrad = config.use_amsgrad)
-		if config.optimizer == 'SGD':
-			optimizer = tf.keras.optimizers.SGD(learning_rate = config.learning_rate, momentum = config.momentum, nesterov = config.use_nestrov)
-		self.model.compile(optimizer = optimizer, loss = config.loss, metrics = ['accuracy']) # Compile model and run
-		print('\nKleinNet model compiled using', config.optimizer)
+		if self.config.optimizer == 'Adam':
+			optimizer = tf.keras.optimizers.Adam(learning_rate = self.config.learning_rate, epsilon = self.config.epsilon, amsgrad = self.config.use_amsgrad)
+		if self.config.optimizer == 'SGD':
+			optimizer = tf.keras.optimizers.SGD(learning_rate = self.config.learning_rate, momentum = self.config.momentum, nesterov = self.config.use_nestrov)
+		
+		if self.config.output_activation == 'linear': # Compile model for regression task
+			self.config.history_types = ['loss']
+			self.model.compile(optimizer = optimizer, loss = self.config.loss) # Compile model
+		else: # Else compile model for classification
+			self.config.history_types = ['accuracy', 'loss']
+			self.model.compile(optimizer = optimizer, loss = self.config.loss, metrics = ['accuracy']) # Compile mode
+
+		print(f'\nKleinNet model compiled using {self.config.optimizer}')
+
+		# Check if a model already exists and load	
+		if self.load():
+			print('KleinNet weights loaded...')
+		else: # Else save new weights to checkpoint path
+			self.model.save_weights(self.checkpoint_path)
+
+		# Create a callback to the saved weights for saving model while training
+		self.callbacks = [tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint_path + '',
+											save_weights_only=True,
+											verbose=1)]
 
 	def train(self):
-		self.history = self.model.fit(self.x_train, self.y_train, epochs = config.epochs, batch_size = config.batch_size, validation_data = (self.x_test, self.y_test))
+		self.history = self.model.fit(self.x_train, self.y_train, epochs = self.config.epochs, batch_size = self.config.batch_size, validation_data = (self.x_test, self.y_test), callbacks = self.callbacks)
 
 	def test(self):
-		self.loss, self.accuracy = self.model.evaluate(self.x_test,  self.y_test, verbose=2)
+		self.metrics = self.model.evaluate(self.x_test,  self.y_test, verbose=2)
 
 	def save(self):
-		tf.save_model.save(self.model, 'Model_Description') # Save model
+		if self.model != None:
+			self.model.save_weights(self.checkpoint_path) # Save model
+	
+	def load(self):
+		if os.path.exists(self.checkpoint_path):
+			if len(os.listdir('/'.join(self.checkpoint_path.split('/')[:-1]))) > 0:
+				self.model.load_weights(self.checkpoint_path)
+				print('KleinNet loaded successfully')
+				return True
+			else:
+				print('KleinNet not found...')
+				return False
 
 	def plot_accuracy(self, i = 1):
 		print("\nEvaluating KleinNet model accuracy & loss...")
-		for history_type in ['Accuracy', 'Loss']:		# Evaluate the model accuracy and loss
+		for history_type in self.config.history_types:		# Evaluate the model accuracy and loss
 			plt.plot(self.history.history[history_type.lower()], label=history_type)
 			plt.plot(self.history.history['val_' + history_type.lower()], label = 'Validation ' + history_type)
 			plt.xlabel('Epoch')
 			plt.ylabel(history_type)
 			plt.legend(loc='upper right')
 			plt.ylim([0, 1])
-			title = "~learnig rate: " + str(config.learning_rate) + " ~alpha: " + str(config.alpha) + ' ~bias: ' + str(config.bias) + ' ~optimizer: ' + config.optimizer
-			if config.optimizer == 'SGD':
-				title = title + ' ~epsilon: ' + str(config.epsilon)
+			title = f"~learnig rate: {str(self.config.learning_rate)} ~alpha: {str(self.config.alpha)} ~bias: {str(self.config.bias)} ~optimizer: {self.config.optimizer}"
+			if self.config.optimizer == 'SGD':
+				title = f"{title} ~epsilon: {str(self.config.epsilon)}"
 			else:
-				title = title + ' ~momentum: ' + str(config.momentum)
+				title = f"{title} ~momentum: {str(self.config.momentum)}"
 			plt.title(title)
-			plt.savefig(config.result_directory + config.run_directory + "/Model_Description/Model_" + str(i + 1) + "_" + history_type + ".png")
+			plt.savefig(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/Model_{str(i + 1)}_{history_type}.png")
 			plt.close()
 
 	def observe(self, interest):
-		print("\nObserving " + config.outputs_category[interest].lower() + " outcome structure")
 		try:
 			self.images
 		except:
-			self.wrangle(self.subject_pool[0])
-		self.sample_label = -1
-		while self.sample_label != interest: # Grab next sample that is the other category
-			self.sample_label = self.labels[random.randint(self.images.shape[0])] # Grab sample label
+			self.images, self.labels, self.header, self.affine = self.load_subject(self.subject_pool[0], load_header = True, load_affine = True)
+		self.sample_label = -2
+		while self.sample_label <= interest - 0.25 or self.sample_label >= interest + 0.25: # Grab next sampsle that is the other category
+			rand_ind = random.randint(0, self.images.shape[0] - 1)
+			self.sample_label = self.labels[rand_ind] # Grab sample label
 		self.sample = self.images[rand_ind, :, :, :, :] # Grab sample volume
-		#self.anatomie = self.anatomies[rand_ind]
-		self.header = self.headers[rand_ind]
-		self.category = config.outputs[sample_label]
 
-		print("\nExtracting " + category + " answer features from KleinNet convolutional layers...")
+		for category, label in zip(self.config.outputs_category, self.config.outputs):
+			if interest == label:
+				self.category = category
+
+		print(f"\nObserving {self.category} outcome structure")
+
+		print(f"\nExtracting {interest} answer features from KleinNet convolutional layers...")
 		self.output_layers, self.filter_counts, self.layer_shapes, self.new_shapes
 		layer_outputs = [layer.output for layer in self.model.layers[:]]
 
-		for self.layer in range(1, (config.convolution_depth*2 + 1)): # Build deconvolutional models for each layer
-			self.activation_model = tf.keras.models.Model(inputs = self.model.input, outputs = [layer_outputs[self.output_layers[self.layer - 1]], self.model.output])
+		for self.layer in range(1, (self.config.convolution_depth*2 + 1)): # Build deconvolutional models for each layer
+			self.model(tf.keras.Input(self.sample.shape))
+			print(self.model.input, self.model.output)
+			self.activation_model = tf.keras.models.Model(inputs = tf.keras.Input(self.images.shape[1:]), outputs = [layer_outputs[self.output_layers[self.layer - 1]], self.model.output])
 			self.deconv_model = tf.keras.models.Sequential() # Create first convolutional layer
-			self.deconv_model.add(tf.keras.layers.Conv3DTranspose(1, config.kernel_size, strides = config.kernel_stride, input_shape = (self.layer_shapes[self.layer - 1][0], self.layer_shapes[self.layer - 1][1], self.layer_shapes[self.layer - 1][2], 1), kernel_initializer = tf.keras.initializers.Ones()))
+			self.deconv_model.add(tf.keras.layers.Conv3DTranspose(1, self.config.kernel_size, strides = self.config.kernel_stride, input_shape = (self.layer_shapes[self.layer - 1][0], self.layer_shapes[self.layer - 1][1], self.layer_shapes[self.layer - 1][2], 1), kernel_initializer = tf.keras.initializers.Ones()))
 			for deconv_layer in range(self.layer - 1, 0, -1): # Build the depths of the deconvolution model
 				if deconv_layer % 2 == 1 & deconv_layer != 1:
-					self.deconv_model.add(tf.keras.layers.UpSampling3D(size = config.pool_size, data_format = 'channels_last'))
-				self.deconv_model.add(tf.keras.layers.Conv3DTranspose(1, config.kernel_size, strides = config.kernel_stride, kernel_initializer = tf.keras.initializers.Ones()))
-			print('Summarizing layer ', self.layer, ' deconvolution model')
+					self.deconv_model.add(tf.keras.layers.UpSampling3D(size = self.config.pool_size, data_format = 'channels_last'))
+				self.deconv_model.add(tf.keras.layers.Conv3DTranspose(1, self.config.kernel_size, strides = self.config.kernel_stride, kernel_initializer = tf.keras.initializers.Ones()))
+			print(f'Summarizing layer {self.layer} deconvolution model')
 			self.deconv_model.build()
 			self.deconv_model.summary()
-			self.feature_maps, predictions = activation_model.predict(sample) # Grab feature map using single volume
+			self.feature_maps, predictions = self.activation_model.predict(self.sample) # Grab feature map using single volume
 			self.feature_maps = self.feature_maps[0, :, :, : ,:].reshape(self.current_shape[0], self.current_shape[1], self.current_shape[2], self.current_shape[3])
 
-			for self.map_index in range(self.feature_maps.shape[3]): # Save feature maps in glass brain visualization pictures
+			for map_index in range(self.feature_maps.shape[3]): # Save feature maps in glass brain visualization pictures
 				feature_map = (self.feature_maps[:, :, :, map_index].reshape(self.current_shape[0], self.current_shape[1], self.current_shape[2])) # Grab Feature map
 				deconv_feature_map = self.deconv_model.predict(self.feature_maps[:, :, :, map_index].reshape(1, self.current_shape[0], self.current_shape[1], self.current_shape[2], 1)).reshape(self.new_shape[0], self.new_shape[1], self.new_shape[2])
-				self.plot_all(heatmap, 'DeConv_Feature_Maps', map_index)
+				self.plot_all(deconv_feature_map, 'DeConv_Feature_Maps', map_index)
 
-			print("\n\nExtracting KleinNet model class activation maps for layer " + self.layer)
+			print(f"\n\nExtracting KleinNet model class activation maps for layer {self.layer}")
 			with tf.GradientTape() as gtape: # Create CAM
-				conv_output, predictions = self.activation_model(sample)
+				conv_output, predictions = self.activation_model(self.sample)
 				loss = predictions[:, np.argmax(predictions[0])]
 				grads = gtape.gradient(loss, conv_output)
 				pooled_grads = K.mean(grads, axis = (0, 1, 2, 3))
@@ -299,6 +364,14 @@ class KleinNet:
 			self.heatmap = self.deconv_model.predict(self.heatmap.reshape(1, self.current_shape[0], self.current_shape[1], self.current_shape[2], 1)).reshape(self.new_shape[0], self.new_shape[1], self.new_shape[2])
 			self.plot_all(self.heatmap, 'CAM', 1)
 
+	# Feature output linear correlation analysis
+	# Within this function we will correlated feature node 
+	# activity to their output value within each layer and 
+	# feature.
+	def folc(self):
+		return
+
+
 	def plot_all(self, data, data_type, map_index):
 		self.surf_stat_maps(data, data_type, map_index)
 		#self.glass_brains(data, data_type, map_index)
@@ -313,8 +386,8 @@ class KleinNet:
 		data = data * intensity
 		# ---------------------------------------------- #
 		data = nib.Nifti1Image(data, affine = self.affine, header = self.header) # Grab feature map
-		title = layer + " " + data_type + " Map " + str(map_index) + " for  " + self.category + " Answer"
-		output_folder = config.result_directory + config.run_directory + self.catergory + '/Layer_' + self.layer + '/' + data_type + '/' + plot_type + '/'
+		title = f"{layer} {data_type} Map {str(map_index)} for  {self.category} Answer"
+		output_folder = f"{self.config.result_directory}{self.config.run_directory}{self.catergory}/Layer_{self.layer}/{data_type}/{plot_type}/"
 		return data, title, threshold, output_folder
 
 	def glass_brains(self, data, data_type, map_index):
@@ -338,10 +411,9 @@ class KleinNet:
 		plotting.plot_surf_stat_map(fsaverage.infl_right, texture, hemi = 'right', view = 'lateral', title = title, colorbar = True, threshold = threshold, bg_map = fsaverage.sulc_right, bg_on_data = True, cmap='Spectral', output_file = (output_folder + 'feature_' + str(map_index) + '-right-lateral-' + self.category + '_category.png'))
 		plotting.plot_surf_stat_map(fsaverage.infl_right, texture, hemi = 'right', view = 'medial', title = title, colorbar = True, threshold = threshold, bg_map = fsaverage.sulc_right, bg_on_data = True, cmap='Spectral', output_file = (output_folder + 'feature_' + str(map_index) + '-right-medial-' + self.category + '_category.png'))
 
-
 	def jack_knife(self, Range = None):
 		for self.jackknife in self.subject_pool:
-			print("Running Jack-Knife on Subject " + str(self.jackknife))
+			print(f"Running Jack-Knife on Subject {str(self.jackknife)}")
 			self.wrangle(self.subject_pool, self.jackknife)
 			self.build()
 			self.train()
@@ -350,7 +422,7 @@ class KleinNet:
 
 	def ROC(self):
 		self.probabilities = self.model.predict(self.x_test).ravel()
-		np.save(self.config.result_directory + self.config.run_directory + '/Jack_Knife/Probabilities/Sub-' + str(self.jackknife) + '_Volumes_Prob.np', self.probabilities)
+		np.save(f"{self.config.result_directory}{self.config.run_directory}/Jack_Knife/Probabilities/Sub-{str(self.jackknife)}_Volumes_Prob.np", self.probabilities)
 		fpr, tpr, threshold = roc_curve(self.y_test, self.probabilities)
 		predictions = np.argmax(self.probabilities, axis=-1)
 		AUC = auc(fpr, tpr)
@@ -359,43 +431,46 @@ class KleinNet:
 		plt.plot(fpr, tpr, label = 'RF (area = {:.3f})'.format(AUC))
 		plt.xlabel('False Positive Rate')
 		plt.ylabel('True Positive Rate')
-		plt.title('Subject ' + str(self.jackknife) + ' ROC Curve')
+		plt.title(f'Subject {str(self.jackknife)} ROC Curve')
 		plt.legend(loc = 'best')
-		plt.savefig(self.config.result_directory + self.config.run_directory + "/Jack_Knife/Sub_" + str(self.jackknife) + "_ROC_Curve.png")
+		plt.savefig(f"{self.config.result_directory}{self.config.run_directory}/Jack_Knife/Sub_{str(self.jackknife)}_ROC_Curve.png")
 		plt.close()
 
-	def create_dir(self, cleandir = True):
+	def create_dir(self, cleandir = None):
 		first_dir = self.config.outputs_category # Create lists of all directory levels for extraction outputs
-		second_dir = ['Layer_' + str(layer) for layer in range(1, self.config.convolution_depth*2 + 1)]
+		second_dir = [f'Layer_{str(layer)}' for layer in range(1, self.config.convolution_depth*2 + 1)]
 		third_dir = ["DeConv_Feature_Maps", "DeConv_CAM"]
 		fourth_dir = ["GB", "SM", "SSM"]
-		try:
-			os.chdir(self.config.result_directory + self.config.run_directory + '/')
-			os.chdir('../..')
-			print('\nRun directory ' + self.config.result_directory + self.config.run_directory + ' currently exists, a clean run directory is needed for KleinNet to output results correctly, would you like to remove and replace the current run directory? (yes or no)')
-			response = 'yes'#input()
-			if response == 'yes':
-				shutil.rmtree(self.config.result_directory + self.config.run_directory)
-				time.sleep(1)
-			else:
+		if cleandir == None:
+			try:
+				if os.path.isdir(f'{self.config.result_directory}{self.config.run_directory}/') == True:
+					print(f'\nRun directory {self.config.result_directory}{self.config.run_directory} currently exists, a clean run directory is needed for KleinNet to output results correctly, would you like to remove and replace the current run directory? (yes or no)')
+					response = input()
+					if response == 'yes':
+						shutil.rmtree(f'{self.config.result_directory}{self.config.run_directory}')
+						time.sleep(1)
+					else:
+						return
+			except:
+				print("Replacing existing run directory failed...")
 				return
-		except:
-			print('\nGenerating run directory')
-		os.mkdir(self.config.result_directory + self.config.run_directory + '/')
-		os.mkdir(self.config.result_directory + self.config.run_directory + "/Model_Description")
-		os.mkdir(self.config.result_directory + self.config.run_directory + '/SVM')
-		os.mkdir(self.config.result_directory + self.config.run_directory + '/Jack_Knife')
-		os.mkdir(self.config.result_directory + self.config.run_directory + '/Jack_Knife/Probabilities')
-		for first in first_dir:
-			os.mkdir(self.config.result_directory + self.config.run_directory + "/" + first)
-			for second in second_dir:
-				os.mkdir(self.config.result_directory + self.config.run_directory + "/" + first + "/" + second)
-				for third in third_dir:
-					os.mkdir(self.config.result_directory + self.config.run_directory + "/" + first + "/" + second + "/" + third)
-					for fourth in fourth_dir:
-						os.mkdir(self.config.result_directory + self.config.run_directory + "/" + first + "/" + second + "/" + third + "/" + fourth)
-		print('\nResult directories generated for ' + self.config.run_directory + '\n')
+		elif cleandir == True:
+			shutil.rmtree(f'{self.config.result_directory}{self.config.run_directory}')
 
+		os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/')
+		os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/KleinNet')
+		os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/Jack_Knife')
+		os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/Jack_Knife/Probabilities')
+		for first in first_dir:
+			os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/{first}')
+			for second in second_dir:
+				os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/{first}/{second}')
+				for third in third_dir:
+					os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/{first}/{second}/{third}')
+					for fourth in fourth_dir:
+						os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/{first}/{second}/{third}/{fourth}')
+		print(f'\nResult directories generated for {self.config.run_directory}\n')
+		
 
 class configuration:
 
@@ -403,19 +478,33 @@ class configuration:
 		self.build() # Build configuration
 
 	def build(self):
+
+		#-------------------------------- Model Set-Up -------------------------------#
+		#These initial variables are used by KleinNet and won't need to be set to anything
+		self.data_shape = None
+		self.checkpoint_path = None
+		self.history_types = ['Accuracy', 'Loss']
+
 		#-------------------------------- Shuffle Data ------------------------------##
 		# Shuffle will zip all images and labels and shuffle the data before assigning
 		# them to training and testing sets. Defaults to true, however you might want
 		# to change this to false if you think your question has a time dimension to it
-		self.shuffle = True
+		self.shuffle = False
+
+
+		#--------------------------------- Rebuild Model ----------------------------##
+		# This variable defines wether a new model will be build each time KleinNet is 
+		# called. It can be useful to set this to True when initially setting up the model
+		# so the model will be rebuilt with new configurations.
+		self.rebuild = False
 
 		#------------------------------- Run parameters ------------------------------#
 		# Epoch and Batch Size - Both used to describe how the model will run, and
 		# for how long. Epochs represents how many times the data will be presented to
 		# the model for deep learning. The batch size simply defines how the model will
 		# batch the samples into miniature training samples to help plot model performance.
-		self.epochs = 100
-		self.batch_size = 20
+		self.epochs = 2
+		self.batch_size = 50
 
 		#---------------------------- Model Hyperparameters ---------------------------#
 		# Model Hyperparameters - Hyperparameters used within the models algorithms to
@@ -429,9 +518,7 @@ class configuration:
 		self.learning_rate = 0.0001
 		self.bias = 0
 		self.dropout = 0.3
-		self.momentum = 0
-
-		#-------------------------------- Model Set-Up -------------------------------#
+		self.momentum = 0.01
 
 		# The Kernel initializer - is used to initialize the state of the model. We initialize
 		# the model (e.g. weights, biases, etc.) using Xavier (glorot) uniform which randomly selects
@@ -488,8 +575,8 @@ class configuration:
 		# is classifying and help it display some of the output better. These variables are
 		# also used within KleinNet.build() to create the output layer. The output activation
 		# is used to decide what activation the model will us in it's output layer.
-		self.output_activation = 'sigmoid'
-		self.outputs = [0, 1]
+		self.output_activation = 'linear'
+		self.outputs = [-1.0, 1.0]
 		self.outputs_category = ['Negative', 'Positive']
 
 		# Optimizers - This section is used to help switch between different Optimizers

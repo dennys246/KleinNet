@@ -7,6 +7,7 @@
 # through this document before starting to alter any of the code to ensure    #
 # you run the model as easily as possible.                                    #
 
+
 #-------------------------------- Shuffle Data ------------------------------##
 # Shuffle will zip all images and labels and shuffle the data before assigning
 # them to training and testing sets. Defaults to true, however you might want
