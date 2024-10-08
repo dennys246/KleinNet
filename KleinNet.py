@@ -69,6 +69,9 @@ class KleinNet:
 		for subject in subjects:
 			if subject != jackknife:
 				image, label = self.load_subject(subject, session, activation, shuffle)
+				if len(label) == 0: # If no images available
+					print(f"Skipping {subject}, no labels...")
+					continue # Skip subjects
 				try:
 					images = np.append(images, image, axis = 0)
 					labels = np.append(labels, label)
@@ -89,6 +92,9 @@ class KleinNet:
 			image_filename = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.bold_identifier}")[0]
 			image_file = nib.load(image_filename) # Load images
 
+			# Grab the image movie
+			movie_version = image_filename.split('movie')[1].split('_')[0]
+
 			header = image_file.header # Grab images header
 
 			# Grab image shape and affine from header
@@ -98,13 +104,18 @@ class KleinNet:
 
 			# Reshape image to have time dimension as first dimension and add channel dimension
 			image = image_file.get_fdata().reshape(image_shape[3], image_shape[0], image_shape[1], image_shape[2], 1)
-			
+			image = self.normalize(image)
 			# Grab fMRI affine transformation matrix
 			affine = image_file.affine 
 
 			# Load labels
-			label_filename = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.label_identifier}")[0]
+			label_filenames = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.label_identifier}")
+			for label_filename in label_filenames:
+				# Check label filename is correct movie version
+				if f'movie{movie_version}' in label_filenames:
+					break
 			labels = []
+
 			with open(label_filename, 'r') as label_file:
 				if label_filename[-4:] == '.txt':
 					labels = label_file.readlines()
@@ -119,6 +130,12 @@ class KleinNet:
 					for row in tsv_reader:
 						labels.append(float(row))
 				labels = np.array(labels)
+
+			print(f'Subject image shape: {labels.shape}')
+			if labels.shape[0] == 0:
+				return [], []
+			
+			labels = self.normalize(labels)
 
 			if activation != 'linear': # If not a regression problem
 				labels = [int(label) for label in labels] # Convert labels to integers for classifing
@@ -142,6 +159,11 @@ class KleinNet:
 		labels = labels[indices]
 		return images, labels
 	
+	def normalize(self, array):
+		array_min = np.min(array)
+		array_max = np.max(array)
+		return (array - array_min) / (array_max - array_min)
+
 	def mean_filter(image, filter_size):
 		return
 	
@@ -216,15 +238,16 @@ class KleinNet:
 		self.plan()
 
 		self.checkpoint_path = f"{self.config.result_directory}{self.config.run_directory}/KleinNet/ckpt.weights.h5"
-
 		print('\nConstructing KleinNet model')
 		self.model = tf.keras.models.Sequential() # Create first convolutional layer
 		for layer in range(1, self.config.convolution_depth + 1): # Build the layer on convolutions based on config convolution depth indicated
+			# Removed -> input=tf.keras.Input((self.config.data_shape[0], self.config.data_shape[1], self.config.data_shape[2], 1), self.config.batch_size)
 			self.model.add(tf.keras.layers.Conv3D(self.filter_counts[layer*2 - 2], self.config.kernel_size, strides = self.config.kernel_stride, padding = self.config.zero_padding, input_shape = (self.config.data_shape[0], self.config.data_shape[1], self.config.data_shape[2], 1), use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias)))
-			self.model.add(LeakyReLU(alpha = self.config.alpha))
+				
+			self.model.add(LeakyReLU(negative_slope = self.config.negative_slope))
 			self.model.add(tf.keras.layers.BatchNormalization())
 			self.model.add(tf.keras.layers.Conv3D(self.filter_counts[layer*2 - 1], self.config.kernel_size, strides = self.config.kernel_stride, padding = self.config.zero_padding, use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias)))
-			self.model.add(LeakyReLU(alpha = self.config.alpha))
+			self.model.add(LeakyReLU(negative_slope = self.config.negative_slope))
 			self.model.add(tf.keras.layers.BatchNormalization())
 			if layer < self.config.convolution_depth:
 				self.model.add(tf.keras.layers.MaxPooling3D(pool_size = self.config.pool_size, strides = self.config.pool_stride, padding = self.config.zero_padding, data_format = "channels_last"))
@@ -233,7 +256,7 @@ class KleinNet:
 		self.model.add(tf.keras.layers.Flatten()) # Create heavy top density layers
 		for density, dense_dropout in zip(self.config.top_density, self.config.density_dropout[1:]):
 			self.model.add(tf.keras.layers.Dense(density, use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias))) # Density layer based on population size of V1 based on Full-density multi-scale account of structure and dynamics of macaque visual cortex by Albada et al.
-			self.model.add(LeakyReLU(alpha = self.config.alpha))
+			self.model.add(LeakyReLU(negative_slope = self.config.negative_slope))
 			if dense_dropout == True:
 				self.model.add(tf.keras.layers.Dropout(self.config.dropout))
 		self.model.add(tf.keras.layers.Dense(1, activation=self.config.output_activation)) #Create output layer
@@ -247,9 +270,11 @@ class KleinNet:
 			optimizer = tf.keras.optimizers.SGD(learning_rate = self.config.learning_rate, momentum = self.config.momentum, nesterov = self.config.use_nestrov)
 		
 		if self.config.output_activation == 'linear': # Compile model for regression task
+			self.config.loss = 'mse'
 			self.config.history_types = ['loss']
 			self.model.compile(optimizer = optimizer, loss = self.config.loss) # Compile model
 		else: # Else compile model for classification
+			self.config.loss = 'binary_crossentropy'
 			self.config.history_types = ['accuracy', 'loss']
 			self.model.compile(optimizer = optimizer, loss = self.config.loss, metrics = ['accuracy']) # Compile mode
 
@@ -267,7 +292,8 @@ class KleinNet:
 											verbose=1)]
 
 	def train(self):
-		self.history = self.model.fit(self.x_train, self.y_train, epochs = self.config.epochs, batch_size = self.config.batch_size, validation_data = (self.x_test, self.y_test), callbacks = self.callbacks)
+		print(f"\nx-train: {self.x_train.shape}\ny-train: {self.y_train.shape}\n\nx_test: {self.x_test.shape}\ny_test: {self.y_test.shape}")
+		self.history = self.model.fit(self.x_train, self.y_train, epochs = self.config.epochs, batch_size = self.config.batch_size, validation_data = (self.x_test, self.y_test)) #, callbacks = self.callbacks)
 
 	def test(self):
 		self.metrics = self.model.evaluate(self.x_test,  self.y_test, verbose=2)
@@ -295,7 +321,7 @@ class KleinNet:
 			plt.ylabel(history_type)
 			plt.legend(loc='upper right')
 			plt.ylim([0, 1])
-			title = f"~learnig rate: {str(self.config.learning_rate)} ~alpha: {str(self.config.alpha)} ~bias: {str(self.config.bias)} ~optimizer: {self.config.optimizer}"
+			title = f"~learnig rate: {str(self.config.learning_rate)} ~negative_slope: {str(self.config.negative_slope)} ~bias: {str(self.config.bias)} ~optimizer: {self.config.optimizer}"
 			if self.config.optimizer == 'SGD':
 				title = f"{title} ~epsilon: {str(self.config.epsilon)}"
 			else:
@@ -436,26 +462,20 @@ class KleinNet:
 		plt.savefig(f"{self.config.result_directory}{self.config.run_directory}/Jack_Knife/Sub_{str(self.jackknife)}_ROC_Curve.png")
 		plt.close()
 
-	def create_dir(self, cleandir = None):
+	def create_dir(self):
 		first_dir = self.config.outputs_category # Create lists of all directory levels for extraction outputs
 		second_dir = [f'Layer_{str(layer)}' for layer in range(1, self.config.convolution_depth*2 + 1)]
 		third_dir = ["DeConv_Feature_Maps", "DeConv_CAM"]
 		fourth_dir = ["GB", "SM", "SSM"]
-		if cleandir == None:
-			try:
-				if os.path.isdir(f'{self.config.result_directory}{self.config.run_directory}/') == True:
-					print(f'\nRun directory {self.config.result_directory}{self.config.run_directory} currently exists, a clean run directory is needed for KleinNet to output results correctly, would you like to remove and replace the current run directory? (yes or no)')
-					response = input()
-					if response == 'yes':
-						shutil.rmtree(f'{self.config.result_directory}{self.config.run_directory}')
-						time.sleep(1)
-					else:
-						return
-			except:
-				print("Replacing existing run directory failed...")
+		if self.config.reset_model == True:
+			if os.path.isdir(f'{self.config.result_directory}{self.config.run_directory}/') == True:
+				print(f'\nRun directory {self.config.result_directory}{self.config.run_directory}, clearing directory...')
+				shutil.rmtree(f'{self.config.result_directory}{self.config.run_directory}')
+				time.sleep(1)
+		else: # If not resetting model
+			if os.path.isdir(f'{self.config.result_directory}{self.config.run_directory}/') == True: # If model exists
+				print(f"Run directory already exists for {self.config.run_directory}, consider altering run directory or deleting model (i.e. setting config.reset_model = True)")
 				return
-		elif cleandir == True:
-			shutil.rmtree(f'{self.config.result_directory}{self.config.run_directory}')
 
 		os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/')
 		os.mkdir(f'{self.config.result_directory}{self.config.run_directory}/KleinNet')
@@ -513,7 +533,7 @@ class configuration:
 		# the KleinNet library to find optimum values. Bias can be a bit tricky to optimize
 		# and I would recommend using the KleinNet.optimum_bias() to find bias when using
 		# an inbalanced dataset. Hyperparameter descriptors to be added with GUI.
-		self.alpha = 0.1
+		self.negative_slope = 0.1 # Alpha 
 		self.epsilon = 1e-6
 		self.learning_rate = 0.0001
 		self.bias = 0
@@ -567,7 +587,7 @@ class configuration:
 		# to the top_density variable and this is to account for the flattening layer that
 		# is automatically built within the KleinNet.build() function. The first value of
 		# density_dropout[0] corresponds to dropout applied to the flatterning layer.
-		self.top_density = [40, 11, 10]
+		self.top_density = [50, 20, 10]
 		self.density_dropout = [True, False, False, False]
 
 
@@ -576,7 +596,7 @@ class configuration:
 		# also used within KleinNet.build() to create the output layer. The output activation
 		# is used to decide what activation the model will us in it's output layer.
 		self.output_activation = 'linear'
-		self.outputs = [-1.0, 1.0]
+		self.outputs = [0.0, 1.0]
 		self.outputs_category = ['Negative', 'Positive']
 
 		# Optimizers - This section is used to help switch between different Optimizers
@@ -591,7 +611,7 @@ class configuration:
 		# Loss - This variable describes the loss calculation used within the model.
 		# the standard used while initially building KleinNet was binary crossentropy
 		# however you may need to change this based on the questions you are asking.
-		self.loss = 'binary_crossentropy'
+		self.loss = 'mse'
 
 		# Folder Structure - These variables are used to desribes where data is stored
 		# along with where to store the outputs of KleinNet. The results directory is
