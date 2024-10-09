@@ -23,6 +23,8 @@ class KleinNet:
 		print("\n - KleinNet Initialized -\n - Process PID - " + str(os.getpid()) + ' -\n')
 
 	def orient(self, bids_dir, bold_identifier, label_identifier):
+		self.create_dir()
+
 		# Attach orientation variables to object for future use
 		self.bids_dir = bids_dir
 		self.bold_identifier = bold_identifier
@@ -317,7 +319,6 @@ class KleinNet:
 		if self.load():
 			print('KleinNet weights loaded...')
 		else: # Else save new weights to checkpoint path
-			self.create_dir()
 			self.model.save_weights(self.checkpoint_path)
 
 		# Create a callback to the saved weights for saving model while training
@@ -508,8 +509,8 @@ class KleinNet:
 		third_dir = ["DeConv_Feature_Maps", "DeConv_CAM"]
 		fourth_dir = ["GB", "SM", "SSM"]
 		if self.config.rebuild == True:
-			if os.path.isdir(f'{self.config.result_directory}{self.config.run_directory}/') == True:
-				print(f'\nRun directory {self.config.result_directory}{self.config.run_directory}, clearing directory...')
+			if os.path.exists(f'{self.config.result_directory}{self.config.run_directory}/') == True:
+				print(f'\nRun directory {self.config.result_directory}{self.config.run_directory} already exists, clearing directory...')
 				shutil.rmtree(f'{self.config.result_directory}{self.config.run_directory}')
 				time.sleep(1)
 		else: # If not resetting model
@@ -564,7 +565,7 @@ class configuration:
 		# for how long. Epochs represents how many times the data will be presented to
 		# the model for deep learning. The batch size simply defines how the model will
 		# batch the samples into miniature training samples to help plot model performance.
-		self.epochs = 11
+		self.epochs = 10
 		self.batch_size = 50
 
 		#---------------------------- Model Hyperparameters ---------------------------#
@@ -574,7 +575,7 @@ class configuration:
 		# the KleinNet library to find optimum values. Bias can be a bit tricky to optimize
 		# and I would recommend using the KleinNet.optimum_bias() to find bias when using
 		# an inbalanced dataset. Hyperparameter descriptors to be added with GUI.
-		self.negative_slope = 0.1 # Alpha 
+		self.negative_slope = 0.1 # Formally known as alpha 
 		self.epsilon = 1e-6
 		self.learning_rate = 0.0001
 		self.bias = 0
