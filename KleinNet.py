@@ -27,13 +27,20 @@ class KleinNet:
 		self.bids_dir = bids_dir
 		self.bold_identifier = bold_identifier
 		self.label_identifier = label_identifier
-
+		if os.path.exists(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/subjects_run.txt"):
+			with open(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/subjects_run.txt", 'r') as file:
+				self.previously_run = file.read().split('\n')
+		else:
+			self.previously_run = []
 		print(f"\nOrienting and generating KleinNet lexicons for bids directory {bids_dir}...")
 		# Grab all available subjects with fMRIPrep data
 		self.subject_pool = []
 		self.subject_folders = [item for item in glob(f"{bids_dir}/derivatives/{self.config.tool}/sub-*") if os.path.isdir(item)]
 		for subject in self.subject_folders:
 			subject_id = subject.split('/')[-1]
+
+			if subject_id in self.previously_run: # If subject was previously run, exclude from subject pool
+				continue
 			# Grab all available sessions
 
 			sessions = glob(f"{subject}/ses-*/")
@@ -66,7 +73,20 @@ class KleinNet:
 
 	def wrangle(self, subjects = None, session = '*', activation = 'linear', shuffle = False, jackknife = None):
 		# Run through each subject and load data
+		self.current_batch = subjects
+		if os.path.exists(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/subjects_run.txt"):
+			with open(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/subjects_run.txt", 'r') as file:
+				self.previously_run = file.read().split('\n')
+		else:
+			self.previously_run = []
+		images = np.array([])
 		for subject in subjects:
+			if subject in self.config.excluded_subjects: # Check if subject is in excluded list
+				print(f'Excluding subject {subject} from run...')
+				continue
+			if subject in self.previously_run: # check is subject previously run
+				print(f"Subject {subject} previously run, skipping subject...")
+				continue
 			if subject != jackknife:
 				image, label = self.load_subject(subject, session, activation, shuffle)
 				if len(label) == 0: # If no images available
@@ -78,6 +98,8 @@ class KleinNet:
 				except:
 					images = image
 					labels = label
+		if images.shape[0] == 0:
+			return False
 		if jackknife == None:
 			self.x_train = images[:(round((images.shape[0]/3)*2)),:,:,:]
 			self.y_train = labels[:(round((len(labels)/3)*2))]
@@ -87,33 +109,41 @@ class KleinNet:
 			self.x_train = images
 			self.y_train = labels
 			self.x_test, self.y_test = self.load_subject(jackknife, session, activation, shuffle)
+		print(f"X train shape: {self.x_train.shape}")
+		return True
 
 	def load_subject(self, subject, session = '*', activation = 'linear', shuffle = False, load_affine = False, load_header = False):
-			image_filename = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.bold_identifier}")[0]
-			image_file = nib.load(image_filename) # Load images
-
-			# Grab the image movie
-			movie_version = image_filename.split('movie')[1].split('_')[0]
+			
+			image_filenames = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.bold_identifier}")
+			if len(image_filenames) == 0:
+				print(f'No images found for {subject} ses-{session}')
+				return [], []
+			else:
+				image_filename = image_filenames[0]
+				image_file = nib.load(image_filename) # Load images
 
 			header = image_file.header # Grab images header
 
 			# Grab image shape and affine from header
 			image_shape = header.get_data_shape() 
-			if self.config.data_shape == None:
-				self.config.data_shape = image_shape[:-1]
 
 			# Reshape image to have time dimension as first dimension and add channel dimension
 			image = image_file.get_fdata().reshape(image_shape[3], image_shape[0], image_shape[1], image_shape[2], 1)
+			if self.config.data_shape == None:
+				self.config.data_shape = image.shape[1:-1]
+				print(f"Data shape: {self.config.data_shape}")
+
+			# Normalize data
 			image = self.normalize(image)
 			# Grab fMRI affine transformation matrix
 			affine = image_file.affine 
 
 			# Load labels
 			label_filenames = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.label_identifier}")
-			for label_filename in label_filenames:
-				# Check label filename is correct movie version
-				if f'movie{movie_version}' in label_filenames:
-					break
+			if len(label_filenames) != 1:
+				print(f"Multiple/no label files found for subject {subject}: {label_filenames}")
+			else:
+				label_filename = label_filenames[0]
 			labels = []
 
 			with open(label_filename, 'r') as label_file:
@@ -131,8 +161,9 @@ class KleinNet:
 						labels.append(float(row))
 				labels = np.array(labels)
 
-			print(f'Subject image shape: {labels.shape}')
-			if labels.shape[0] == 0:
+			print(f'Subject {subject} image shape: {labels.shape}')
+			if labels.shape[0] == 0 or labels.shape[0] != image.shape[0]:
+				print(f"Labels are empty or labels length does not match image length...\n Image shape - {image.shape}\n Label shape - {labels.shape})")
 				return [], []
 			
 			labels = self.normalize(labels)
@@ -191,8 +222,10 @@ class KleinNet:
 		self.output_layers = []
 		conv_shape = [self.config.data_shape[0], self.config.data_shape[1], self.config.data_shape[2]]
 		conv_layer = 1
+		print(f"Convolution Shape: {conv_shape}")
 		for depth in range(self.config.convolution_depth):
-			conv_shape = self.calcConv(conv_shape)
+			if depth > 0:
+				conv_shape = self.calcConv(conv_shape)
 			self.layer_shapes.append(conv_shape)
 			self.output_layers.append(conv_layer)
 			conv_layer += 3
@@ -216,7 +249,7 @@ class KleinNet:
 			print(f"Layer {layer + 1} ({plan[0]}) | Filter count: {plan[1]} | Layer Shape: {plan[2]} | Deconvolution Output: {plan[3]}")
 
 	def calcConv(self, shape):
-		return [(input_length - filter_length + (2*pad))//stride + 1 for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
+		return [(input_length - filter_length + (2*pad))/stride + 1 for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
 
 	def calcMaxPool(self, shape):
 		return [(input_length - pool_length + (2*pad))//stride + 1 for input_length, pool_length, stride, pad in zip(shape, self.config.pool_size, self.config.pool_stride, self.config.padding)]
@@ -225,10 +258,10 @@ class KleinNet:
 		if self.config.zero_padding == 'valid':
 			return [round((input_length - 1)*stride + filter_length) for input_length, filter_length, stride in zip(shape, self.config.kernel_size, self.config.kernel_stride)]
 		else:
-			return [round(input_length*stride) for input_length, filter_length, stride in zip(shape, self.config.kernel_size, self.config.kernel_stride)]
+			return [round((input_length - 1)*stride + filter_length - 2*pad) for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
 
 	def calcUpSample(self, shape):
-		return [round((input_length - 1)*(filter_length/stride)*2) for input_length, filter_length, stride in zip(shape, self.config.pool_size, self.config.pool_stride)]
+		return [round(input_length * filter_length) for input_length, filter_length, stride in zip(shape, self.config.pool_size, self.config.pool_stride)]
 
 	def build(self, load = False):
 		# Plan out model structure
@@ -284,6 +317,7 @@ class KleinNet:
 		if self.load():
 			print('KleinNet weights loaded...')
 		else: # Else save new weights to checkpoint path
+			self.create_dir()
 			self.model.save_weights(self.checkpoint_path)
 
 		# Create a callback to the saved weights for saving model while training
@@ -294,6 +328,9 @@ class KleinNet:
 	def train(self):
 		print(f"\nx-train: {self.x_train.shape}\ny-train: {self.y_train.shape}\n\nx_test: {self.x_test.shape}\ny_test: {self.y_test.shape}")
 		self.history = self.model.fit(self.x_train, self.y_train, epochs = self.config.epochs, batch_size = self.config.batch_size, validation_data = (self.x_test, self.y_test)) #, callbacks = self.callbacks)
+		self.previously_run += self.current_batch
+		with open(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/subjects_run.txt", "w") as output:
+			output.write('\n'.join(self.previously_run))
 
 	def test(self):
 		self.metrics = self.model.evaluate(self.x_test,  self.y_test, verbose=2)
@@ -305,9 +342,12 @@ class KleinNet:
 	def load(self):
 		if os.path.exists(self.checkpoint_path):
 			if len(os.listdir('/'.join(self.checkpoint_path.split('/')[:-1]))) > 0:
-				self.model.load_weights(self.checkpoint_path)
-				print('KleinNet loaded successfully')
-				return True
+				try:
+					self.model.load_weights(self.checkpoint_path)
+					print('KleinNet loaded successfully')
+					return True
+				except:
+					return False
 			else:
 				print('KleinNet not found...')
 				return False
@@ -467,7 +507,7 @@ class KleinNet:
 		second_dir = [f'Layer_{str(layer)}' for layer in range(1, self.config.convolution_depth*2 + 1)]
 		third_dir = ["DeConv_Feature_Maps", "DeConv_CAM"]
 		fourth_dir = ["GB", "SM", "SSM"]
-		if self.config.reset_model == True:
+		if self.config.rebuild == True:
 			if os.path.isdir(f'{self.config.result_directory}{self.config.run_directory}/') == True:
 				print(f'\nRun directory {self.config.result_directory}{self.config.run_directory}, clearing directory...')
 				shutil.rmtree(f'{self.config.result_directory}{self.config.run_directory}')
@@ -504,6 +544,7 @@ class configuration:
 		self.data_shape = None
 		self.checkpoint_path = None
 		self.history_types = ['Accuracy', 'Loss']
+		self.excluded_subjects = []
 
 		#-------------------------------- Shuffle Data ------------------------------##
 		# Shuffle will zip all images and labels and shuffle the data before assigning
@@ -523,7 +564,7 @@ class configuration:
 		# for how long. Epochs represents how many times the data will be presented to
 		# the model for deep learning. The batch size simply defines how the model will
 		# batch the samples into miniature training samples to help plot model performance.
-		self.epochs = 2
+		self.epochs = 11
 		self.batch_size = 50
 
 		#---------------------------- Model Hyperparameters ---------------------------#
