@@ -212,6 +212,12 @@ class KleinNet:
 	def laplacian_filter(image, filter_size, sign = 'positive'):
 		return
 
+	def dilation_filter(image, filter_size):
+		return
+
+	def erosion_filter(image, filter_size):
+		return
+
 	def plan(self):
 		print("\nPlanning KleinNet model structure")
 		self.filter_counts = []
