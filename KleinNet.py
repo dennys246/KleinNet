@@ -1,5 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import os, shutil, time, time, random, csv, tqdm, atexit	
+import os, shutil, time, time, random, csv, tqdm, atexit, json	
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Ask tensorflow to not use GPU
 import tensorflow as tf
 import numpy as np
@@ -71,7 +71,7 @@ class KleinNet:
 				self.subject_pool.append(subject_id)
 
 		subject_pool = '\n'.join(self.subject_pool)
-		print(f"Subject pool available for use...\n{subject_pool}")
+		print(f"\n\nSubject pool available for use...\n{subject_pool}")
 
 	def wrangle(self, subjects = None, session = '*', activation = 'linear', shuffle = False, jackknife = None):
 		# Run through each subject and load data
@@ -323,9 +323,14 @@ class KleinNet:
 
 		# Check if a model already exists and load	
 		if self.load():
-			print('KleinNet weights loaded...')
+			print('KleinNet weights and history loaded...')
 		else: # Else save new weights to checkpoint path
 			self.model.save_weights(self.checkpoint_path)
+			self.model_history = {}
+			for history_type in self.config.history_types:
+				self.model_history[history_type] = [] 
+				self.model_history[f"val_{history_type}"] = [] 
+			print(f"Model weights reinitialized")
 
 		# Create a callback to the saved weights for saving model while training
 		self.callbacks = [tf.keras.callbacks.ModelCheckpoint(filepath=self.checkpoint_path + '',
@@ -334,23 +339,34 @@ class KleinNet:
 
 	def train(self):
 		print(f"\nx-train: {self.x_train.shape}\ny-train: {self.y_train.shape}\n\nx_test: {self.x_test.shape}\ny_test: {self.y_test.shape}")
-		self.history = self.model.fit(self.x_train, self.y_train, epochs = self.config.epochs, batch_size = self.config.batch_size, validation_data = (self.x_test, self.y_test)) #, callbacks = self.callbacks)
+		self.history = self.model.fit(self.x_train, self.y_train, epochs = self.config.epochs, batch_size = self.config.batch_size, validation_data = (self.x_test, self.y_test), callbacks = self.callbacks)
+		print(f"Train history: {self.history}")
+		for history_type in self.config.history_types: # Save training history
+			self.model_history[history_type] += self.history.history[history_type]
+			self.model_history[f'val_{history_type}'] += self.history.history[f'val_{history_type}']
+
 		self.previously_run += self.current_batch
 		with open(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/subjects_run.txt", "w") as output:
 			output.write('\n'.join(self.previously_run))
 
 	def test(self):
-		self.metrics = self.model.evaluate(self.x_test,  self.y_test, verbose=2)
+		self.history = self.model.evaluate(self.x_test,  self.y_test, verbose=2)
+		print(f"Test History: {self.history}")
+		for history_type in self.config.history_types: # Save test history
+			self.model_history[f"val_{history_type}"] += self.history.history[f"val_{history_type}"]
 
 	def save(self):
 		if self.model != None:
 			self.model.save_weights(self.checkpoint_path) # Save model
+			with open(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/history.json", 'w') as file:
+				json.dump(self.model_history, file) # Save model history
 	
 	def load(self):
 		if os.path.exists(self.checkpoint_path):
 			if len(os.listdir('/'.join(self.checkpoint_path.split('/')[:-1]))) > 0:
 				try:
 					self.model.load_weights(self.checkpoint_path)
+					self.model_history = json.load(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/history.json")
 					print('KleinNet loaded successfully')
 					return True
 				except:
@@ -362,8 +378,8 @@ class KleinNet:
 	def plot_accuracy(self, i = 1):
 		print("\nEvaluating KleinNet model accuracy & loss...")
 		for history_type in self.config.history_types:		# Evaluate the model accuracy and loss
-			plt.plot(self.history.history[history_type.lower()], label=history_type)
-			plt.plot(self.history.history['val_' + history_type.lower()], label = 'Validation ' + history_type)
+			plt.plot(self.model_history[history_type], label=history_type)
+			plt.plot(self.model_history[f"val_{history_type}"], label = f'validation {history_type}')
 			plt.xlabel('Epoch')
 			plt.ylabel(history_type)
 			plt.legend(loc='upper right')
@@ -374,7 +390,7 @@ class KleinNet:
 			else:
 				title = f"{title} ~momentum: {str(self.config.momentum)}"
 			plt.title(title)
-			plt.savefig(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/Model_{str(i + 1)}_{history_type}.png")
+			plt.savefig(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/Model_{str(i)}_{history_type}.png")
 			plt.close()
 
 	def observe(self, interest):
@@ -539,6 +555,15 @@ class KleinNet:
 		print(f'\nResult directories generated for {self.config.run_directory}\n')
 		
 
+class evaluateEpoch(tf.keras.callbacks.Callback):
+	def __init__(self, x, y):
+		self.x = x
+		self.y = y
+	
+	def on_epoch_end(self, epoch, logs={}):
+		scores = self.model.evaluate(self.x, self.y, verbose=False)
+		print(f'Scores {scores}')
+
 class configuration:
 
 	def __init__(self):
@@ -635,7 +660,7 @@ class configuration:
 		# to the top_density variable and this is to account for the flattening layer that
 		# is automatically built within the KleinNet.build() function. The first value of
 		# density_dropout[0] corresponds to dropout applied to the flatterning layer.
-		self.top_density = [50, 20, 10]
+		self.top_density = [100, 40, 20]
 		self.density_dropout = [True, False, False, False]
 
 
