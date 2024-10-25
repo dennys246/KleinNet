@@ -22,7 +22,7 @@ class KleinNet:
 
 		print("\n - KleinNet Initialized -\n - Process PID - " + str(os.getpid()) + ' -\n')
 
-	def orient(self, bids_dir, bold_identifier, label_identifier):
+	def orient(self, bids_dir, bold_identifier, label_identifier, exclude_trained = False):
 		self.create_dir()
 
 		# Attach orientation variables to object for future use
@@ -37,11 +37,11 @@ class KleinNet:
 		print(f"\nOrienting and generating KleinNet lexicons for bids directory {bids_dir}...")
 		# Grab all available subjects with fMRIPrep data
 		self.subject_pool = []
-		self.subject_folders = [item for item in glob(f"{bids_dir}/derivatives/{self.config.tool}/sub-*") if os.path.isdir(item)]
-		for subject in self.subject_folders:
+		lexicon = [item for item in glob(f"{bids_dir}/derivatives/{self.config.tool}/sub-*") if os.path.isdir(item)]
+		for subject in lexicon:
 			subject_id = subject.split('/')[-1]
 
-			if subject_id in self.previously_run: # If subject was previously run, exclude from subject pool
+			if exclude_trained == True and subject_id in self.previously_run: # If subject was previously run, exclude from subject pool
 				continue
 			# Grab all available sessions
 
@@ -73,7 +73,16 @@ class KleinNet:
 		subject_pool = '\n'.join(self.subject_pool)
 		print(f"\n\nSubject pool available for use...\n{subject_pool}")
 
-	def wrangle(self, subjects = None, session = '*', activation = 'linear', shuffle = False, jackknife = None):
+	def wrangle(self, subjects = [], count = 0, session = '*', activation = 'linear', shuffle = False, jackknife = None, exclude_trained = False):
+		
+		subject_count = 0
+		if count == 0 and len(subjects) < 3:
+			print("Not enough subjects passed into wrangle, must pass in at least 3 subjects to evenly split between test and training")
+			return
+		if count == 0:
+			count = len(subjects)
+
+		
 		# Run through each subject and load data
 		self.current_batch = subjects
 		if os.path.exists(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/subjects_run.txt"):
@@ -81,12 +90,23 @@ class KleinNet:
 				self.previously_run = file.read().split('\n')
 		else:
 			self.previously_run = []
+		
 		images = np.array([])
-		for subject in subjects:
+
+		self.test_indices = []
+		self.train_indices = []
+		train_test_mod = 0
+
+		while subject_count < count:
+			if subjects == []: # If we've run out of subjects but need more
+				subject = self.subject_pool.pop(0)
+			else:
+				subject = subjects.pop(0)
+			print(subject)
 			if subject in self.config.excluded_subjects: # Check if subject is in excluded list
 				print(f'Excluding subject {subject} from run...')
 				continue
-			if subject in self.previously_run: # check is subject previously run
+			if exclude_trained == True and subject in self.previously_run: # check is subject previously run
 				print(f"Subject {subject} previously run, skipping subject...")
 				continue
 			if subject != jackknife:
@@ -100,13 +120,21 @@ class KleinNet:
 				except:
 					images = image
 					labels = label
+
+				if train_test_mod % 3 < 2:
+					self.train_indices += [ind for ind in range(len(self.train_indices), len(self.train_indices) + len(image) - 1 )]
+				else:
+					self.test_indices += [ind for ind in range(len(self.test_indices), len(self.test_indices) + len(image) - 1)]
+				train_test_mod += 1
+			subject_count += 1
 		if images.shape[0] == 0:
 			return False
 		if jackknife == None:
-			self.x_train = images[:(round((images.shape[0]/3)*2)),:,:,:]
-			self.y_train = labels[:(round((len(labels)/3)*2))]
-			self.x_test = images[(round((images.shape[0]/3)*2)):,:,:,:]
-			self.y_test = labels[(round((len(labels)/3)*2)):]
+			print(f'Max test indice {max(self.test_indices)}\nMax train indices {max(self.train_indices)}\nLength of images {images.shape}\nLength of labels: {len(labels)}\nTraining Indices: {len(self.train_indices)}\nTesting Indices: {len(self.test_indices)}')
+			self.x_train = images[self.train_indices,:,:,:]
+			self.y_train = labels[self.train_indices]
+			self.x_test = images[self.test_indices,:,:,:]
+			self.y_test = labels[self.test_indices]
 		else:
 			self.x_train = images
 			self.y_train = labels
@@ -114,12 +142,22 @@ class KleinNet:
 		print(f"X train shape: {self.x_train.shape}")
 		return True
 
-	def load_subject(self, subject, session = '*', activation = 'linear', shuffle = False, load_affine = False, load_header = False):
-			
+	def load_subject(self, subject, session, activation = 'linear', shuffle = False, load_affine = False, load_header = False):
+			print(subject)
+			def empty_exit(load_affine, load_header):
+				if load_affine == False and load_header == False:
+					return [], []
+				if load_header == False and load_affine == True:
+					return [], [], []
+				if load_header == True and load_affine == False:
+					return [], [], []
+				if load_header == True and load_affine == True:
+					return [], [], [], []
+
 			image_filenames = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.bold_identifier}")
 			if len(image_filenames) == 0:
 				print(f'No images found for {subject} ses-{session}')
-				return [], []
+				return empty_exit(load_affine, load_header)
 			else:
 				image_filename = image_filenames[0]
 				image_file = nib.load(image_filename) # Load images
@@ -144,10 +182,12 @@ class KleinNet:
 			label_filenames = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.label_identifier}")
 			if len(label_filenames) != 1:
 				print(f"Multiple/no label files found for subject {subject}: {label_filenames}")
+				empty_exit(load_affine, load_header)
 			else:
 				label_filename = label_filenames[0]
 			labels = []
 
+			print(label_filename)
 			with open(label_filename, 'r') as label_file:
 				if label_filename[-4:] == '.txt':
 					labels = label_file.readlines()
@@ -166,7 +206,7 @@ class KleinNet:
 			print(f'Subject {subject} image shape: {labels.shape}')
 			if labels.shape[0] == 0 or labels.shape[0] != image.shape[0]:
 				print(f"Labels are empty or labels length does not match image length...\n Image shape - {image.shape}\n Label shape - {labels.shape})")
-				return [], []
+				return empty_exit(load_affine, load_header)
 			
 			labels = self.normalize(labels)
 
@@ -178,11 +218,11 @@ class KleinNet:
 
 			if load_affine == False and load_header == False:
 				return image, labels
-			elif load_header == False and load_affine == True:
+			if load_header == False and load_affine == True:
 				return image, labels, affine
-			elif load_header == True and load_affine == False:
+			if load_header == True and load_affine == False:
 				return image, labels, header
-			elif load_header == True and load_affine == True:
+			if load_header == True and load_affine == True:
 				return image, labels, header, affine
 
 	def shuffle(self, images, labels):
@@ -245,6 +285,7 @@ class KleinNet:
 				conv_shape = self.calcMaxPool(conv_shape)
 
 		self.new_shapes = []
+		print(f'Layer shapes...\n{self.layer_shapes}')
 		for layer_ind, conv_shape in enumerate(self.layer_shapes):
 			new_shape = self.calcConvTrans(conv_shape)
 			for layer in range(layer_ind,  0, -1):
@@ -257,25 +298,24 @@ class KleinNet:
 			print(f"Layer {layer + 1} ({plan[0]}) | Filter count: {plan[1]} | Layer Shape: {plan[2]} | Deconvolution Output: {plan[3]}")
 
 	def calcConv(self, shape):
-		return [(input_length - filter_length + (2*pad))/stride + 1 for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
+		return [(input_length - filter_length + (2*pad))//stride + 1 for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
 
 	def calcMaxPool(self, shape):
 		return [(input_length - pool_length + (2*pad))//stride + 1 for input_length, pool_length, stride, pad in zip(shape, self.config.pool_size, self.config.pool_stride, self.config.padding)]
 
 	def calcConvTrans(self, shape):
 		if self.config.zero_padding == 'valid':
-			return [round((input_length - 1)*stride + filter_length) for input_length, filter_length, stride in zip(shape, self.config.kernel_size, self.config.kernel_stride)]
+			return [(input_length - 1)*stride + filter_length for input_length, filter_length, stride in zip(shape, self.config.kernel_size, self.config.kernel_stride)]
 		else:
-			return [round((input_length - 1)*stride + filter_length - 2*pad) for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
+			return [(input_length - 1)*stride + filter_length - 2*pad for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
 
 	def calcUpSample(self, shape):
-		return [round(input_length * filter_length) for input_length, filter_length, stride in zip(shape, self.config.pool_size, self.config.pool_stride)]
+		return [input_length * self.config.pool_stride[0] for input_length in shape]
 
 	def build(self, load = False):
 		# Plan out model structure
 		if self.config.data_shape == None:
-			self.wrangle(self.subject_pool[0:1])
-
+			self.wrangle(count = 3, session = 0)
 		self.plan()
 
 		self.checkpoint_path = f"{self.config.result_directory}{self.config.run_directory}/KleinNet/ckpt.weights.h5"
@@ -325,7 +365,8 @@ class KleinNet:
 		if self.load():
 			print('KleinNet weights and history loaded...')
 		else: # Else save new weights to checkpoint path
-			self.model.save_weights(self.checkpoint_path)
+			if os.path.exists(self.checkpoint_path) == False or self.config.rebuild == True:
+				self.model.save_weights(self.checkpoint_path)
 			self.model_history = {}
 			for history_type in self.config.history_types:
 				self.model_history[history_type] = [] 
@@ -366,10 +407,12 @@ class KleinNet:
 			if len(os.listdir('/'.join(self.checkpoint_path.split('/')[:-1]))) > 0:
 				try:
 					self.model.load_weights(self.checkpoint_path)
-					self.model_history = json.load(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/history.json")
+					with open(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/history.json", 'r') as file:
+						self.model_history = json.load(file)
 					print('KleinNet loaded successfully')
 					return True
 				except:
+					print('KleinNet weights and history failed to load...')
 					return False
 			else:
 				print('KleinNet not found...')
@@ -394,15 +437,18 @@ class KleinNet:
 			plt.close()
 
 	def observe(self, interest):
-		try:
-			self.images
-		except:
-			self.images, self.labels, self.header, self.affine = self.load_subject(self.subject_pool[0], load_header = True, load_affine = True)
+		self.images = []
+		ind = 0
+		while self.images == []: # Iterate till you find a subject
+			self.images, self.labels, self.header, self.affine = self.load_subject(self.subject_pool[ind], session = '1', load_affine = True, load_header = True)
+			ind += 1
+
 		self.sample_label = -2
 		while self.sample_label <= interest - 0.25 or self.sample_label >= interest + 0.25: # Grab next sampsle that is the other category
 			rand_ind = random.randint(0, self.images.shape[0] - 1)
 			self.sample_label = self.labels[rand_ind] # Grab sample label
 		self.sample = self.images[rand_ind, :, :, :, :] # Grab sample volume
+#		self.sample = self.sample.reshape((1, self.sample.shape[0], self.sample.shape[1], self.sample.shape[2], self.sample.shape[3]))
 
 		for category, label in zip(self.config.outputs_category, self.config.outputs):
 			if interest == label:
@@ -413,20 +459,30 @@ class KleinNet:
 		print(f"\nExtracting {interest} answer features from KleinNet convolutional layers...")
 		self.output_layers, self.filter_counts, self.layer_shapes, self.new_shapes
 		layer_outputs = [layer.output for layer in self.model.layers[:]]
-
+		layer_names = [layer.name for layer in self.model.layers if layer.name[:6] == 'conv3d']
+		print(f'layer names: {layer_names}')
 		for self.layer in range(1, (self.config.convolution_depth*2 + 1)): # Build deconvolutional models for each layer
 			self.model(tf.keras.Input(self.sample.shape))
-			print(self.model.input, self.model.output)
-			self.activation_model = tf.keras.models.Model(inputs = tf.keras.Input(self.images.shape[1:]), outputs = [layer_outputs[self.output_layers[self.layer - 1]], self.model.output])
+			print(f"Model new input: {self.model.input}")
+			print(f"Model layer output to be applied to activation {self.model.get_layer(layer_names[self.layer - 1]).output}")
+			
+			#self.model.input
+			self.activation_model = tf.keras.models.Model(inputs = tf.keras.Input(self.sample.shape), outputs = [self.model.get_layer(layer_names[self.layer - 1]).output]) 
+			print(f"Model outputs - {self.activation_model.output} \n\n Layer outputs - {layer_outputs[self.output_layers[self.layer - 1]]}")
+
 			self.deconv_model = tf.keras.models.Sequential() # Create first convolutional layer
-			self.deconv_model.add(tf.keras.layers.Conv3DTranspose(1, self.config.kernel_size, strides = self.config.kernel_stride, input_shape = (self.layer_shapes[self.layer - 1][0], self.layer_shapes[self.layer - 1][1], self.layer_shapes[self.layer - 1][2], 1), kernel_initializer = tf.keras.initializers.Ones()))
+			print(f"Deconv model shape - {self.layer_shapes[self.layer - 1][0], self.layer_shapes[self.layer - 1][1], self.layer_shapes[self.layer - 1][2]}")
+			self.deconv_model.add(tf.keras.layers.Conv3DTranspose(1, kernel_size = self.config.kernel_size, strides = self.config.kernel_stride, input_shape = (self.layer_shapes[self.layer - 1][0], self.layer_shapes[self.layer - 1][1], self.layer_shapes[self.layer - 1][2], 1), kernel_initializer = tf.keras.initializers.Ones()))
 			for deconv_layer in range(self.layer - 1, 0, -1): # Build the depths of the deconvolution model
-				if deconv_layer % 2 == 1 & deconv_layer != 1:
+				if deconv_layer % 2 == 1 and deconv_layer != 1:
 					self.deconv_model.add(tf.keras.layers.UpSampling3D(size = self.config.pool_size, data_format = 'channels_last'))
 				self.deconv_model.add(tf.keras.layers.Conv3DTranspose(1, self.config.kernel_size, strides = self.config.kernel_stride, kernel_initializer = tf.keras.initializers.Ones()))
 			print(f'Summarizing layer {self.layer} deconvolution model')
 			self.deconv_model.build()
 			self.deconv_model.summary()
+			print(f"Sample shape {self.sample.shape}")
+			self.activation_model.summary()
+			self.sample = self.sample.reshape((1, self.sample.shape[0], self.sample.shape[1], self.sample.shape[2], self.sample.shape[3]))
 			self.feature_maps, predictions = self.activation_model.predict(self.sample) # Grab feature map using single volume
 			self.feature_maps = self.feature_maps[0, :, :, : ,:].reshape(self.current_shape[0], self.current_shape[1], self.current_shape[2], self.current_shape[3])
 
@@ -434,8 +490,8 @@ class KleinNet:
 				feature_map = (self.feature_maps[:, :, :, map_index].reshape(self.current_shape[0], self.current_shape[1], self.current_shape[2])) # Grab Feature map
 				deconv_feature_map = self.deconv_model.predict(self.feature_maps[:, :, :, map_index].reshape(1, self.current_shape[0], self.current_shape[1], self.current_shape[2], 1)).reshape(self.new_shape[0], self.new_shape[1], self.new_shape[2])
 				self.plot_all(deconv_feature_map, 'DeConv_Feature_Maps', map_index)
-
 			print(f"\n\nExtracting KleinNet model class activation maps for layer {self.layer}")
+			
 			with tf.GradientTape() as gtape: # Create CAM
 				conv_output, predictions = self.activation_model(self.sample)
 				loss = predictions[:, np.argmax(predictions[0])]
@@ -453,12 +509,31 @@ class KleinNet:
 			self.heatmap = self.deconv_model.predict(self.heatmap.reshape(1, self.current_shape[0], self.current_shape[1], self.current_shape[2], 1)).reshape(self.new_shape[0], self.new_shape[1], self.new_shape[2])
 			self.plot_all(self.heatmap, 'CAM', 1)
 
+
 	# Feature output linear correlation analysis
 	# Within this function we will correlated feature node 
 	# activity to their output value within each layer and 
 	# feature.
 	def folc(self):
+		# For each layer
+		
+		# For each feature map
+
+		# For each node
+
+		# Iterate through a subjects bold images
+		# Collect each feature map activity
+
+		# Correlate the feature node activity to the output (NN output or label?)
+
+		# Output 3D r coefficient matrix to their T1/T2 and plot
+			# Which slices to use until we build GUI?
+
+		# Convolve feature maps with r coefficient matrix and plot
 		return
+
+# How do we incorperate the unique attributes and personality of a child?
+# ElasticNet and MVPA integration
 
 
 	def plot_all(self, data, data_type, map_index):
@@ -555,15 +630,6 @@ class KleinNet:
 		print(f'\nResult directories generated for {self.config.run_directory}\n')
 		
 
-class evaluateEpoch(tf.keras.callbacks.Callback):
-	def __init__(self, x, y):
-		self.x = x
-		self.y = y
-	
-	def on_epoch_end(self, epoch, logs={}):
-		scores = self.model.evaluate(self.x, self.y, verbose=False)
-		print(f'Scores {scores}')
-
 class configuration:
 
 	def __init__(self):
@@ -610,7 +676,7 @@ class configuration:
 		self.epsilon = 1e-6
 		self.learning_rate = 0.0001
 		self.bias = 0
-		self.dropout = 0.3
+		self.dropout = 0.5
 		self.momentum = 0.01
 
 		# The Kernel initializer - is used to initialize the state of the model. We initialize
