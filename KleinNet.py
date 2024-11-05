@@ -16,9 +16,11 @@ from random import randint, randrange
 
 class KleinNet:
 	def __init__(self):
-		self.config = configuration()
+		self.config = configuration() # Load default configuration
+
 		self.model = None # Initialize model variable
-		atexit.register(self.save)
+
+		atexit.register(self.save) # Set up force save model before exiting
 
 		print("\n - KleinNet Initialized -\n - Process PID - " + str(os.getpid()) + ' -\n')
 

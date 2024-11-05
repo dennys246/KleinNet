@@ -9,3 +9,6 @@ kleinnet_bsub.sh
 logs/*
 kleinnet/*
 check_shape.py
+.netrc
+.nda_creds
+abcd_downloader.sh
