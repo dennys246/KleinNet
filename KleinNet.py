@@ -1,6 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
 import os, shutil, time, time, random, csv, tqdm, atexit, json	
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1" # Ask tensorflow to not use GPU
 import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
@@ -31,58 +30,74 @@ class KleinNet:
 		self.bids_dir = bids_dir
 		self.bold_identifier = bold_identifier
 		self.label_identifier = label_identifier
+
+		# Look for previously run subjects
 		if os.path.exists(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/subjects_run.txt"):
 			with open(f"{self.config.result_directory}{self.config.run_directory}/KleinNet/subjects_run.txt", 'r') as file:
 				self.previously_run = file.read().split('\n')
 		else:
 			self.previously_run = []
-		print(f"\nOrienting and generating KleinNet lexicons for bids directory {bids_dir}...")
+
 		# Grab all available subjects with fMRIPrep data
 		self.subject_pool = []
+		print(f"\nOrienting and generating KleinNet lexicons for bids directory {bids_dir}...")
+		
+		# Generate a lexicon of all potential subjects
 		lexicon = [item for item in glob(f"{bids_dir}/derivatives/{self.config.tool}/sub-*") if os.path.isdir(item)]
+		# Iterate through each subject found
 		for subject in lexicon:
 			subject_id = subject.split('/')[-1]
 
-			if exclude_trained == True and subject_id in self.previously_run: # If subject was previously run, exclude from subject pool
+			# If subject was previously run, exclude from subject pool
+			if exclude_trained == True and subject_id in self.previously_run: 
 				continue
-			# Grab all available sessions
 
+			# Grab all available sessions
 			sessions = glob(f"{subject}/ses-*/")
+
+			# If none found alert about missing data
 			if len(sessions) == 0:
 				print(f"No sessions found for {subject_id}")
+
+			# Iterate through each session
 			for session in sessions:
+
 				# Look if the subject has usable bold file
 				bold_filename = glob(f"{session}/func/{bold_identifier}")
-				if len(bold_filename) == 0:
+				if len(bold_filename) == 0: # If none found, skip
 					continue
-				if len(bold_filename) > 1:
+				if len(bold_filename) > 1: # If too many found, skip
 					bold_filename = '\n'.join(bold_filename)
 					print(f"Multiple bold files found for {subject_id}...\n{bold_filename}")
 					continue
 
 				# Look if the subject has labels (regressors/classifiers)
 				label_filename = glob(f"{session}/func/{label_identifier}")
-				if len(label_filename) == 0:
+				if len(label_filename) == 0: # If none found, skip
 					print(f"No labels found for {subject_id}, excluding from analysis...")
 					continue
-				if len(label_filename) > 1:
+				if len(label_filename) > 1: # If too many found, continue
 					label_filename = '\n'.join(label_filename)
 					print(f"Multiple label files found for {subject_id}...\n{label_filename}")
 					continue
 
-				self.subject_pool.append(subject_id)
+				# Add subject to subject pool if it passed criteria
+				self.subject_pool.append(subject_id) 
 
+		# Print found subject pool to user
 		subject_pool = '\n'.join(self.subject_pool)
 		print(f"\n\nSubject pool available for use...\n{subject_pool}")
 
 	def wrangle(self, subjects = [], count = 0, session = '*', activation = 'linear', shuffle = False, jackknife = None, exclude_trained = False):
-		
+		# wrangle subjects into training and testing datasets
+
+		# Define the subject count found
 		subject_count = 0
-		if count == 0 and len(subjects) < 3:
+		if count == 0 and len(subjects) < 3: # Check that enough subjects were passed in
 			print("Not enough subjects passed into wrangle, must pass in at least 3 subjects to evenly split between test and training")
-			return
-		if count == 0:
-			count = len(subjects)
+			return 
+		if count == 0: # If count not set
+			count = len(subjects) # Set count to number of subjects passed
 
 		
 		# Run through each subject and load data
@@ -93,51 +108,63 @@ class KleinNet:
 		else:
 			self.previously_run = []
 		
+		# Define variables to hold subject data
 		images = np.array([])
-
 		self.test_indices = []
 		self.train_indices = []
 		train_test_mod = 0
 
+		# While we haven't reached out subject count goal (minimum of 3)
 		while subject_count < count:
-			if subjects == []: # If we've run out of subjects but need more
+
+			# If we've run out of subjects but need more
+			if subjects == []: 
 				subject = self.subject_pool.pop(0)
-			else:
+			else: # Grab the first subject in our passes subject list
 				subject = subjects.pop(0)
 			print(subject)
-			if subject in self.config.excluded_subjects: # Check if subject is in excluded list
+
+			# Check if subject is in excluded list
+			if subject in self.config.excluded_subjects: 
 				print(f'Excluding subject {subject} from run...')
 				continue
+
+			# If subject previously run and we're not retraining
 			if exclude_trained == True and subject in self.previously_run: # check is subject previously run
 				print(f"Subject {subject} previously run, skipping subject...")
 				continue
+
+			# If we're not 
 			if subject != jackknife:
 				image, label = self.load_subject(subject, session, activation, shuffle)
 				if len(label) == 0: # If no images available
 					print(f"Skipping {subject}, no labels...")
 					continue # Skip subjects
-				try:
+				try: # appending the images to the image object
 					images = np.append(images, image, axis = 0)
 					labels = np.append(labels, label)
-				except:
+				except: # initialize a new image object
 					images = image
 					labels = label
 
-				if train_test_mod % 3 < 2:
+				# Figure out if the subject is apart of training for testing
+				if train_test_mod % 3 < 2: # add indices to training
 					self.train_indices += [ind for ind in range(len(self.train_indices), len(self.train_indices) + len(image) - 1 )]
-				else:
+				else: # add indices to testing
 					self.test_indices += [ind for ind in range(len(self.test_indices), len(self.test_indices) + len(image) - 1)]
-				train_test_mod += 1
+				train_test_mod += 1 # increment training
 			subject_count += 1
+		
+		# Check if images loaded had any volumes in then
 		if images.shape[0] == 0:
 			return False
-		if jackknife == None:
+		if jackknife == None: # Split images and labels into training and test sets
 			print(f'Max test indice {max(self.test_indices)}\nMax train indices {max(self.train_indices)}\nLength of images {images.shape}\nLength of labels: {len(labels)}\nTraining Indices: {len(self.train_indices)}\nTesting Indices: {len(self.test_indices)}')
 			self.x_train = images[self.train_indices,:,:,:]
 			self.y_train = labels[self.train_indices]
 			self.x_test = images[self.test_indices,:,:,:]
 			self.y_test = labels[self.test_indices]
-		else:
+		else: # handle jackknife case of grabbing just one subject for test and using all other samples for training
 			self.x_train = images
 			self.y_train = labels
 			self.x_test, self.y_test = self.load_subject(jackknife, session, activation, shuffle)
@@ -145,7 +172,9 @@ class KleinNet:
 		return True
 
 	def load_subject(self, subject, session, activation = 'linear', shuffle = False, load_affine = False, load_header = False):
-			print(subject)
+			print(f"Loading subject {subject}")
+
+			# Create a call for handling an empty empty exit
 			def empty_exit(load_affine, load_header):
 				if load_affine == False and load_header == False:
 					return [], []
@@ -156,15 +185,17 @@ class KleinNet:
 				if load_header == True and load_affine == True:
 					return [], [], [], []
 
+			# look for all relavent image files
 			image_filenames = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.bold_identifier}")
-			if len(image_filenames) == 0:
+			if len(image_filenames) == 0: #  if no image files found, return empty handed
 				print(f'No images found for {subject} ses-{session}')
 				return empty_exit(load_affine, load_header)
-			else:
+			else: # Grab and load image
 				image_filename = image_filenames[0]
 				image_file = nib.load(image_filename) # Load images
-
-			header = image_file.header # Grab images header
+			
+			# Grab images header/meta data
+			header = image_file.header 
 
 			# Grab image shape and affine from header
 			image_shape = header.get_data_shape() 
@@ -180,44 +211,56 @@ class KleinNet:
 			# Grab fMRI affine transformation matrix
 			affine = image_file.affine 
 
-			# Load labels
+			# Grab relavent label filenames
 			label_filenames = glob(f"{self.bids_dir}/derivatives/{self.config.tool}/{subject}/ses-{session}/func/{self.label_identifier}")
-			if len(label_filenames) != 1:
+			if len(label_filenames) != 1: # If we grabbed more/less than one label file, exit
 				print(f"Multiple/no label files found for subject {subject}: {label_filenames}")
 				empty_exit(load_affine, load_header)
-			else:
+			else: # Grab filename
 				label_filename = label_filenames[0]
-			labels = []
 
-			print(label_filename)
+			
+
+			print(f"Loading {label_filename}...")
+			# initialize empty labels and read in labels
+			labels = []
 			with open(label_filename, 'r') as label_file:
-				if label_filename[-4:] == '.txt':
+				# Handle text file case
+				if label_filename[-4:] == '.txt': 
 					labels = label_file.readlines()
 					labels = [float(label) for label in ''.join(labels).split('\n') if label != '']
+				
+				# Handle csv file case
 				if label_filename[-4:] == '.csv':
 					labels = []
 					csv_reader = csv.reader(label_filename)
 					for row in csv_reader:
 						labels.append(float(row))
+
+				# Handle tsv file case
 				if label_filename[-4:] == '.tsv':
 					tsv_reader = csv.reader(label_filename, '\t')
 					for row in tsv_reader:
 						labels.append(float(row))
+
+				# Load labels into a numpy array
 				labels = np.array(labels)
 
 			print(f'Subject {subject} image shape: {labels.shape}')
+			
+			# If no labels ended up being loaded, exit
 			if labels.shape[0] == 0 or labels.shape[0] != image.shape[0]:
 				print(f"Labels are empty or labels length does not match image length...\n Image shape - {image.shape}\n Label shape - {labels.shape})")
 				return empty_exit(load_affine, load_header)
 			
-			labels = self.normalize(labels)
-
 			if activation != 'linear': # If not a regression problem
 				labels = [int(label) for label in labels] # Convert labels to integers for classifing
 			
+			#  Shuffle images and labels if configured
 			if self.config.shuffle == True or shuffle == True:
 				image, labels = self.shuffle(image, labels)
 
+			# Return requested subject data
 			if load_affine == False and load_header == False:
 				return image, labels
 			if load_header == False and load_affine == True:
@@ -228,16 +271,26 @@ class KleinNet:
 				return image, labels, header, affine
 
 	def shuffle(self, images, labels):
+		# Get sample indices
 		indices = np.arange(images.shape[0])
+
+		# Shuffle indices
 		np.random.shuffle(indices)
+
+		# Rearrange images and labels using shuffled indices
 		images = images[indices, :, :, :, :]
 		labels = labels[indices]
 		return images, labels
 	
 	def normalize(self, array):
+		# Find array min
 		array_min = np.min(array)
+
+		# Find array max
 		array_max = np.max(array)
-		return (array - array_min) / (array_max - array_min)
+
+		# Pass back normalized array
+		return (array - array_min) / (array_max - array_min) 
 
 	def mean_filter(image, filter_size):
 		return
@@ -262,11 +315,14 @@ class KleinNet:
 
 	def plan(self):
 		print("\nPlanning KleinNet model structure")
+		# initialize an empty list to store layer filter counts
 		self.filter_counts = []
+		
+		#Iterate through each layer and calculate filter counts
 		convolution_size = self.config.init_filter_count
 		for depth in range(self.config.convolution_depth*2):
 			self.filter_counts.append(convolution_size)
-			convolution_size = convolution_size*2
+			convolution_size = convolution_size*2 # Double the size each layer
 
 		self.layer_shapes = []
 		self.output_layers = []
@@ -398,6 +454,7 @@ class KleinNet:
 		for history_type in self.config.history_types: # Save test history
 			self.model_history[f"val_{history_type}"] += self.history.history[f"val_{history_type}"]
 
+
 	def save(self):
 		if self.model != None:
 			self.model.save_weights(self.checkpoint_path) # Save model
@@ -511,12 +568,12 @@ class KleinNet:
 			self.heatmap = self.deconv_model.predict(self.heatmap.reshape(1, self.current_shape[0], self.current_shape[1], self.current_shape[2], 1)).reshape(self.new_shape[0], self.new_shape[1], self.new_shape[2])
 			self.plot_all(self.heatmap, 'CAM', 1)
 
-
-	# Feature output linear correlation analysis
-	# Within this function we will correlated feature node 
-	# activity to their output value within each layer and 
-	# feature.
 	def folc(self):
+		# Feature output linear correlation analysis
+		# Within this function we will correlated feature node 
+		# activity to their output value within each layer and 
+		# feature.	
+
 		# For each layer
 		
 		# For each feature map
