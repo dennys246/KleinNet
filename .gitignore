@@ -7,8 +7,9 @@ DataWrangler.py
 pre_kleinnet_bsub.sh
 kleinnet_bsub.sh
 logs/*
-kleinnet/*
+boldnet/*
 check_shape.py
 .netrc
 .nda_creds
 abcd_downloader.sh
+*bsub.sh
