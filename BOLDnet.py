@@ -261,13 +261,22 @@ class BOLDnet:
 		if x_range == None:
 			x_range = range(50)
 
+		correct_count = 0
+		for y_ind, y_pred in enumerate(output):
+			if y_pred < 0 and self.y_test[y_ind] < 0:
+				correct_count += 1
+			if y_pred > 0 and self.y_test[y_ind] > 0:
+				correct_count += 1
+		accuracy = round((correct_count/len(output))*100, 2)
+
 		plt.plot(x_range, [output[value] for value in x_range], label = 'Predicted Value', color = 'orange')
 		plt.plot(x_range, [self.y_test[value] for value in x_range], label = 'Actual Value', color = 'blue')
 		plt.legend()
 		plt.xlabel("Sample Volume")
 		plt.ylabel("Value")
-		plt.title("Predictions vs. Actual Output for fMRI Images")
+		plt.title(f"Predictions vs. Actual Output for fMRI Images ({accuracy}% General Accuracy)")
 		plt.savefig(f"{self.config.project_directory}{self.config.model_directory}/prediction_vs_real_output.png")
+
 
 	def save(self):
 		if self.model != None:

@@ -13,3 +13,4 @@ check_shape.py
 .nda_creds
 abcd_downloader.sh
 *bsub.sh
+__pycache__/
