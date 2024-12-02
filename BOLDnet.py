@@ -185,7 +185,7 @@ class BOLDnet:
 		else: # Else compile model for classification
 			self.config.loss = 'binary_crossentropy'
 			self.config.history_types = ['accuracy', 'loss']
-			self.model.compile(optimizer = optimizer, loss = self.config.loss, metrics = ['accuracy']) # Compile mode
+			self.model.compile(optimizer = optimizer, loss = self.config.loss, metrics = ['accuracy', 'loss']) # Compile mode
 
 		print(f'\nBOLDnet model compiled using {self.config.optimizer}')
 
