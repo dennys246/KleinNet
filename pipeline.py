@@ -71,7 +71,7 @@ class wrangler:
 					labels = label
 
 				# Figure out if the subject is apart of training for testing
-				if train_test_mod % 3 < 2: # add indices to training
+				if train_test_mod % 3 > 0: # add indices to training
 					train_indices += [ind for ind in range(len(train_indices), len(train_indices) + len(image) - 1 )]
 				else: # add indices to testing
 					test_indices += [ind for ind in range(len(test_indices), len(test_indices) + len(image) - 1)]
