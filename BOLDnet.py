@@ -2,7 +2,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import os, atexit, pipeline, observer, config
 import tensorflow as tf
 import matplotlib.pyplot as plt
-from tensorflow.keras.layers import Conv2D
 from glob import glob
 
 class BOLDnet:
@@ -307,10 +306,10 @@ class SqueezeAndExcitation(tf.keras.layers.Layer):
 
     def build(self, input_shape):
         channels = input_shape[-1]
-        self.global_avg_pool = tf.keras.layers.GlobalAveragePooling2D()
+        self.global_avg_pool = tf.keras.layers.GlobalAveragePooling3D()
         self.dense1 = tf.keras.layers.Dense(channels // self.reduction_ratio, activation='relu')
         self.dense2 = tf.keras.layers.Dense(channels, activation='sigmoid')
-        self.reshape = tf.keras.layers.Reshape((1, 1, channels))
+        self.reshape = tf.keras.layers.Reshape((1, 1, 1, channels))
         self.multiply = tf.keras.layers.Multiply()
 
     def call(self, inputs):
@@ -324,49 +323,34 @@ class SqueezeAndExcitation(tf.keras.layers.Layer):
 	
 class SpatialAttention(tf.keras.layers.Layer):
     def __init__(self, kernel_size=7, **kwargs):
-        """
-        Spatial Attention Block
-        Args:
-            kernel_size: Size of the convolutional kernel for attention mapping.
-        """
         super(SpatialAttention, self).__init__(**kwargs)
         self.kernel_size = kernel_size
 
     def build(self, input_shape):
-        """
-        Initialize the convolutional layer used to compute the spatial attention map.
-        """
-        # 2-channel input (avg-pool + max-pool)
-        self.conv = tf.keras.layers.Conv2D(
+        self.conv = tf.keras.layers.Conv3D(
             filters=1, 
-            kernel_size=self.kernel_size, 
+            kernel_size=(1, self.kernel_size, self.kernel_size), 
             strides=1, 
             padding="same", 
             activation="sigmoid"
         )
 
     def call(self, inputs):
-        """
-        Forward pass of the spatial attention block.
-        """
-        # Compute average-pooling and max-pooling across the channel dimension
-        avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)  # Shape: (batch, H, W, 1)
-        max_pool = tf.reduce_max(inputs, axis=-1, keepdims=True)  # Shape: (batch, H, W, 1)
+        # Calculate average-pooling and max-pooling
+        avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)
+        max_pool = tf.reduce_max(inputs, axis=-1, keepdims=True)
 
-        # Concatenate pooled tensors along the last axis
-        concat = tf.keras.layers.Concatenate(axis=-1)([avg_pool, max_pool])  # Shape: (batch, H, W, 2)
+        # Concatenate pooled tensors
+        concat = tf.keras.layers.Concatenate(axis=-1)([avg_pool, max_pool]) 
 
         # Compute spatial attention map
-        attention = self.conv(concat)  # Shape: (batch, H, W, 1)
+        attention = self.conv(concat) 
 
-        # Scale input by attention map
+        # Scale by attention map
         output = tf.keras.layers.Multiply()([inputs, attention])
         return output
 
     def get_config(self):
-        """
-        Return the configuration of the layer for model saving and serialization.
-        """
         config = super(SpatialAttention, self).get_config()
         config.update({"kernel_size": self.kernel_size})
         return config
