@@ -10,7 +10,7 @@ class wrangler:
 		self.config = config
 		return
 	
-	def wrangle(self, subject_pool, subjects = [], count = 0, session = '*', activation = 'linear', shuffle = False, jackknife = None, exclude_trained = False):
+	def wrangle(self, subject_pool, subjects = [], count = 0, session = '*', activation = 'linear', shuffle = False, jackknife = None, exclude_trained = False, shape_extraction = False):
 		# wrangle subjects into training and testing datasets
 		# 
 		# Define the subject count found
@@ -25,11 +25,6 @@ class wrangler:
 		
 		# Run through each subject and load data
 		self.current_batch = subjects
-		if os.path.exists(f"{self.config.project_directory}{self.config.model_directory}/subjects_run.txt"):
-			with open(f"{self.config.project_directory}{self.config.model_directory}/subjects_run.txt", 'r') as file:
-				self.previously_run = file.read().split('\n')
-		else:
-			self.previously_run = []
 		
 		# Define variables to hold subject data
 		images = np.array([])
@@ -53,7 +48,7 @@ class wrangler:
 				continue
 
 			# If subject previously run and we're not retraining
-			if exclude_trained == True and subject in self.previously_run: # check is subject previously run
+			if exclude_trained == True and subject in self.config.previously_run: # check is subject previously run
 				print(f"Subject {subject} previously run, skipping subject...")
 				continue
 
@@ -75,11 +70,13 @@ class wrangler:
 					train_indices += [ind for ind in range(len(train_indices), len(train_indices) + len(image) - 1 )]
 				else: # add indices to testing
 					test_indices += [ind for ind in range(len(test_indices), len(test_indices) + len(image) - 1)]
+				
+				self.current_batch.append(subject)
 				train_test_mod += 1 # increment training
 			subject_count += 1
 		
 		# If grabbing a single subject...
-		if count == 1:
+		if count == 1 and shape_extraction == True:
 			subjects.insert(0, subject)
 			return True
 
@@ -88,16 +85,22 @@ class wrangler:
 			return False
 		
 		if jackknife == None: # Split images and labels into training and test sets
-			print(f'Max test indice {max(test_indices)}\nMax train indices {max(train_indices)}\nLength of images {images.shape}\nLength of labels: {len(labels)}\nTraining Indices: {len(train_indices)}\nTesting Indices: {len(test_indices)}')
-			x_train = images[train_indices,:,:,:]
-			y_train = labels[train_indices]
-			x_test = images[test_indices,:,:,:]
-			y_test = labels[test_indices]
+			if train_indices != []:
+				print(f'Max test indice {max(test_indices)}\nMax train indices {max(train_indices)}\nLength of images {images.shape}\nLength of labels: {len(labels)}\nTraining Indices: {len(train_indices)}\nTesting Indices: {len(test_indices)}')
+				x_train = images[train_indices,:,:,:]
+				y_train = labels[train_indices]
+				x_test = images[test_indices,:,:,:]
+				y_test = labels[test_indices]
+			else:
+				print(f'Max test indice {max(test_indices)}\nLength of labels: {len(labels)}\nTesting Indices: {len(test_indices)}')
+				x_train = []
+				y_train = []
+				x_test = images[test_indices,:,:,:]
+				y_test = labels[test_indices]
 		else: # handle jackknife case of grabbing just one subject for test and using all other samples for training
 			x_train = images
 			y_train = labels
 			x_test, self.y_test = self.load_subject(jackknife, session, activation, shuffle)
-		print(f"X train shape: {x_train.shape}")
 		return x_train, y_train, x_test, y_test
 	
 	def load_subject(self, subject, session, activation = 'linear', shuffle = False, load_affine = False, load_header = False):
@@ -138,6 +141,7 @@ class wrangler:
 
         # Normalize data
 		image = self.normalize(image)
+
         # Grab fMRI affine transformation matrix
 		affine = image_file.affine 
 
@@ -220,7 +224,7 @@ class wrangler:
 		array_max = np.max(array)
 
 		# Pass back normalized array
-		return (array - array_min) / (array_max - array_min) 
+		return 2 * (array - array_min) / (array_max - array_min) - 1
 
 	def mean_filter(self, image, filter_size):
 		return
@@ -262,8 +266,9 @@ class wrangler:
 
 		os.mkdir(f'{self.config.project_directory}{self.config.model_directory}/')
 		os.mkdir(f'{self.config.project_directory}{self.config.model_directory}/model')
-		os.mkdir(f'{self.config.project_directory}{self.config.model_directory}/Jack_Knife')
-		os.mkdir(f'{self.config.project_directory}{self.config.model_directory}/Jack_Knife/Probabilities')
+		os.mkdir(f'{self.config.project_directory}{self.config.model_directory}/plots')
+		os.mkdir(f'{self.config.project_directory}{self.config.model_directory}/jack_knife')
+		os.mkdir(f'{self.config.project_directory}{self.config.model_directory}/jack_knife/probabilities')
 		for first in first_dir:
 			os.mkdir(f'{self.config.project_directory}{self.config.model_directory}/{first}')
 			for second in second_dir:
