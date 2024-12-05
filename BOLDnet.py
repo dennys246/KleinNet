@@ -2,7 +2,7 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import os, atexit, pipeline, observer, config
 import tensorflow as tf
 import matplotlib.pyplot as plt
-from tensorflow.keras.layers import LeakyReLU
+from tensorflow.keras.layers import Conv2D
 from glob import glob
 
 class BOLDnet:
@@ -32,13 +32,6 @@ class BOLDnet:
 		self.config.bold_identifier = bold_identifier
 		self.config.label_identifier = label_identifier
 
-		# Look for previously run subjects
-		if os.path.exists(f"{self.config.project_directory}{self.config.model_directory}/subjects_run.txt"):
-			with open(f"{self.config.project_directory}{self.config.model_directory}/subjects_run.txt", 'r') as file:
-				self.previously_run = file.read().split('\n')
-		else:
-			self.previously_run = []
-
 		# Grab all available subjects with fMRIPrep data
 		self.subject_pool = []
 		print(f"\nOrienting and generating BOLDnet lexicons for bids directory {self.config.bids_directory}...")
@@ -50,7 +43,7 @@ class BOLDnet:
 			subject_id = subject.split('/')[-1]
 
 			# If subject was previously run, exclude from subject pool
-			if exclude_trained == True and subject_id in self.previously_run: 
+			if exclude_trained == True and subject_id in self.config.previously_run: 
 				continue
 
 			# Grab all available sessions
@@ -83,18 +76,23 @@ class BOLDnet:
 					continue
 
 				# Add subject to subject pool if it passed criteria
-				self.subject_pool.append(subject_id) 
+				if subject_id not in self.subject_pool:
+					self.subject_pool.append(subject_id) 
 
 		# Print found subject pool to user
-		self.config.subject_pool = self.subject_pool
+		self.config.subject_pool += self.subject_pool
 		subject_pool = '\n'.join(self.subject_pool)
 		print(f"\n\nSubject pool available for use...\n{subject_pool}")
 		
 	def load(self, subjects = [], count = 0, session = '*', activation = 'linear', shuffle = False, jackknife = None, exclude_trained = False):
 		if len(subjects) > 0: count = len(subjects)
 
-		if count > 1:
-			self.x_train, self.y_train, self.x_test, self.y_test = self.wrangler.wrangle(self.subject_pool, subjects, count, session, activation, shuffle, jackknife, exclude_trained)
+		if count >= 0:
+			results = self.wrangler.wrangle(self.subject_pool, subjects, count, session, activation, shuffle, jackknife, exclude_trained)
+			if results != False:
+				self.x_train, self.y_train, self.x_test, self.y_test = results
+			else:
+				return False
 		else:
 			self.wrangler.wrangle(self.subject_pool, subjects, count, session, activation, shuffle, jackknife, exclude_trained)
 		return True
@@ -141,7 +139,7 @@ class BOLDnet:
 		# Plan out model structure
 		
 		if self.config.data_shape == None:
-			self.wrangler.wrangle(self.subject_pool, count = -1, session = 0)
+			self.wrangler.wrangle(self.subject_pool, count = -1, session = 0, shape_extraction = True)
 		self.plan()
 
 		self.checkpoint_path = f"{self.config.project_directory}{self.config.model_directory}/model/ckpt.weights.h5"
@@ -156,6 +154,7 @@ class BOLDnet:
 			self.model.add(tf.keras.layers.Conv3D(self.filter_counts[layer], self.config.kernel_size, strides = self.config.kernel_stride, padding = self.config.zero_padding, use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias)))
 			self.model.add(tf.keras.layers.LeakyReLU(self.config.negative_slope))
 			self.model.add(tf.keras.layers.BatchNormalization())
+			self.model.add(SpatialAttention())
 			if layer + 1 < self.config.convolution_depth:
 				self.model.add(tf.keras.layers.MaxPooling3D(pool_size = self.config.pool_size, strides = self.config.pool_stride, padding = self.config.zero_padding, data_format = "channels_last"))
 		
@@ -235,9 +234,7 @@ class BOLDnet:
 			self.config.model_history[f'val_{history_type}'] += self.history.history[f'val_{history_type}']
 
 		# Add subjects trained on to previously run batch and save
-		self.previously_run += self.wrangler.current_batch 
-		with open(f"{self.config.project_directory}{self.config.model_directory}/subjects_run.txt", "w") as output:
-			output.write('\n'.join(self.previously_run))
+		self.config.previously_run += self.wrangler.current_batch 
 
 	def test(self):
 		# Test model by evaluating on test set
@@ -255,28 +252,32 @@ class BOLDnet:
 				self.plot_accuracy()
 				self.ROC()
 
-	def predict(self, x_range = None):
+	def predict(self, x_range = None, subject_id = ""):
 		output = self.model.predict(self.x_test)
 		
 		if x_range == None:
 			x_range = range(50)
 
-		correct_count = 0
-		for y_ind, y_pred in enumerate(output):
-			if y_pred < 0 and self.y_test[y_ind] < 0:
-				correct_count += 1
-			if y_pred > 0 and self.y_test[y_ind] > 0:
-				correct_count += 1
-		accuracy = round((correct_count/len(output))*100, 2)
+		if subject_id != "":
+			fileend = f"_{subject_id}.png"
+		else:
+			fileend = ".png"
 
 		plt.plot(x_range, [output[value] for value in x_range], label = 'Predicted Value', color = 'orange')
 		plt.plot(x_range, [self.y_test[value] for value in x_range], label = 'Actual Value', color = 'blue')
 		plt.legend()
 		plt.xlabel("Sample Volume")
 		plt.ylabel("Value")
-		plt.title(f"Predictions vs. Actual Output for fMRI Images ({accuracy}% General Accuracy)")
-		plt.savefig(f"{self.config.project_directory}{self.config.model_directory}/prediction_vs_real_output.png")
-
+		plt.title(f"Predictions vs. Actual Emotional Valence for fMRI Images")
+		plt.savefig(f"{self.config.project_directory}{self.config.model_directory}/plots/prediction_vs_real_output{fileend}")
+		plt.close()
+		
+		plt.scatter(self.y_test, output, color='blue', label='Outcomes')
+		plt.xlabel('Actual Emotional Valence')
+		plt.ylabel(f'Predicted Emotional Valence')
+		plt.title('Scatter Plot of Emotional Valence Predicted vs. Actual Outcomes')
+		plt.savefig(f"{self.config.project_directory}{self.config.model_directory}/plots/prediction_vs_real_scatterplot{fileend}")
+		plt.close()
 
 	def save(self):
 		if self.model != None:
@@ -298,4 +299,74 @@ class BOLDnet:
 				print('BOLDnet not found...')
 				return False
 		
-		
+
+class SqueezeAndExcitation(tf.keras.layers.Layer):
+    def __init__(self, reduction_ratio=16, **kwargs):
+        super(SqueezeAndExcitation, self).__init__(**kwargs)
+        self.reduction_ratio = reduction_ratio
+
+    def build(self, input_shape):
+        channels = input_shape[-1]
+        self.global_avg_pool = tf.keras.layers.GlobalAveragePooling2D()
+        self.dense1 = tf.keras.layers.Dense(channels // self.reduction_ratio, activation='relu')
+        self.dense2 = tf.keras.layers.Dense(channels, activation='sigmoid')
+        self.reshape = tf.keras.layers.Reshape((1, 1, channels))
+        self.multiply = tf.keras.layers.Multiply()
+
+    def call(self, inputs):
+        # Squeeze
+        x = self.global_avg_pool(inputs)
+        x = self.dense1(x)
+        x = self.dense2(x)
+        x = self.reshape(x)
+        # Scale
+        return self.multiply([inputs, x])
+	
+class SpatialAttention(tf.keras.layers.Layer):
+    def __init__(self, kernel_size=7, **kwargs):
+        """
+        Spatial Attention Block
+        Args:
+            kernel_size: Size of the convolutional kernel for attention mapping.
+        """
+        super(SpatialAttention, self).__init__(**kwargs)
+        self.kernel_size = kernel_size
+
+    def build(self, input_shape):
+        """
+        Initialize the convolutional layer used to compute the spatial attention map.
+        """
+        # 2-channel input (avg-pool + max-pool)
+        self.conv = tf.keras.layers.Conv2D(
+            filters=1, 
+            kernel_size=self.kernel_size, 
+            strides=1, 
+            padding="same", 
+            activation="sigmoid"
+        )
+
+    def call(self, inputs):
+        """
+        Forward pass of the spatial attention block.
+        """
+        # Compute average-pooling and max-pooling across the channel dimension
+        avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)  # Shape: (batch, H, W, 1)
+        max_pool = tf.reduce_max(inputs, axis=-1, keepdims=True)  # Shape: (batch, H, W, 1)
+
+        # Concatenate pooled tensors along the last axis
+        concat = tf.keras.layers.Concatenate(axis=-1)([avg_pool, max_pool])  # Shape: (batch, H, W, 2)
+
+        # Compute spatial attention map
+        attention = self.conv(concat)  # Shape: (batch, H, W, 1)
+
+        # Scale input by attention map
+        output = tf.keras.layers.Multiply()([inputs, attention])
+        return output
+
+    def get_config(self):
+        """
+        Return the configuration of the layer for model saving and serialization.
+        """
+        config = super(SpatialAttention, self).get_config()
+        config.update({"kernel_size": self.kernel_size})
+        return config
