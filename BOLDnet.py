@@ -32,7 +32,7 @@ class BOLDnet:
 		self.config.label_identifier = label_identifier
 
 		# Grab all available subjects with fMRIPrep data
-		self.subject_pool = []
+		self.config.subject_pool = []
 		print(f"\nOrienting and generating BOLDnet lexicons for bids directory {self.config.bids_directory}...")
 		
 		# Generate a lexicon of all potential subjects
@@ -75,13 +75,11 @@ class BOLDnet:
 					continue
 
 				# Add subject to subject pool if it passed criteria
-				if subject_id not in self.subject_pool:
-					self.subject_pool.append(subject_id) 
+				if subject_id not in self.config.subject_pool:
+					self.config.subject_pool.append(subject_id) 
 
-		# Print found subject pool to user
-		self.config.subject_pool += self.subject_pool
-		subject_pool = '\n'.join(self.subject_pool)
-		print(f"\n\nSubject pool available for use...\n{subject_pool}")
+		subject_pool = '\n'.join(self.config.subject_pool)
+		print(f"\n\nSubject pool available for use...\n{subject_pool}\n")
 		
 	def load(self, subjects = [], count = 0, session = '*', activation = 'linear', shuffle = False, jackknife = None, exclude_trained = False):
 		if len(subjects) > 0: count = len(subjects)
@@ -138,7 +136,7 @@ class BOLDnet:
 		# Plan out model structure
 		
 		if self.config.data_shape == None:
-			self.wrangler.wrangle(self.subject_pool, count = -1, session = 0, shape_extraction = True)
+			self.wrangler.wrangle(self.config.subject_pool, count = -1, session = 0, shape_extraction = True)
 		self.plan()
 
 		self.checkpoint_path = f"{self.config.project_directory}{self.config.model_directory}/model/ckpt.weights.h5"
