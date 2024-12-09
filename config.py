@@ -36,7 +36,8 @@ config = {
     "output_activation": "linear",
     "outputs": [-1.0, 1.0],
     "outputs_category": ["Negative", "Positive"],
-    "output_descriptor": None,
+    "output_descriptor": "Outcome",
+    "output_unit": "Value",
     "history_types": ["accuracy", "loss"],
     "model_history": {"accuracy":[], 'loss':[], 'val_accuracy':[], 'val_loss': []},
     "optimizers": ["SGD", "Adam"],
@@ -86,7 +87,7 @@ class build:
             config_json = json.load(config_file)
         return config_json
 
-    def configure(self, data_shape, subject_pool, previously_run, excluded_subjects, bids_directory, bold_identifier, label_identifier, project_directory, model_directory, checkpoint_path, model_history, tool, shuffle, epochs, batch_size, negative_slope, epsilon, learning_rate, bias, dropout, momentum, kernel_initializer, convolution_depth, init_filter_count, kernel_size, kernel_stride, zero_padding, padding, pool_size, pool_stride, top_density, density_dropout, output_activation, outputs, outputs_category, output_descriptor, history_types, optimizers, optimizer, use_nestrov, use_amsgrad, loss, rebuild):
+    def configure(self, data_shape, subject_pool, previously_run, excluded_subjects, bids_directory, bold_identifier, label_identifier, project_directory, model_directory, checkpoint_path, model_history, tool, shuffle, epochs, batch_size, negative_slope, epsilon, learning_rate, bias, dropout, momentum, kernel_initializer, convolution_depth, init_filter_count, kernel_size, kernel_stride, zero_padding, padding, pool_size, pool_stride, top_density, density_dropout, output_activation, outputs, outputs_category, output_descriptor, output_unit, history_types, optimizers, optimizer, use_nestrov, use_amsgrad, loss, rebuild):
 		#-------------------------------- Model Set-Up -------------------------------#
 		#These initial variables are used by BOLDnet and won't need to be set to anything
         
@@ -207,6 +208,7 @@ class build:
         self.outputs = outputs
         self.outputs_category = outputs_category
         self.output_descriptor = output_descriptor
+        self.output_unit = output_unit
         self.history_types = history_types
 
 		# Optimizers - This section is used to help switch between different Optimizers
@@ -270,6 +272,7 @@ class build:
             "outputs": self.outputs,
             "outputs_category": self.outputs_category,
             "output_descriptor": self.output_descriptor,
+            "output_unit": self.output_unit,
             "history_types": self.history_types,
             "optimizers": self.optimizers,
             "optimizer": self.optimizer,
