@@ -32,7 +32,7 @@ class BOLDnet:
 		self.config.label_identifier = label_identifier
 
 		# Grab all available subjects with fMRIPrep data
-		self.config.subject_pool = []
+		self.subject_pool = []
 		print(f"\nOrienting and generating BOLDnet lexicons for bids directory {self.config.bids_directory}...")
 		
 		# Generate a lexicon of all potential subjects
@@ -75,11 +75,13 @@ class BOLDnet:
 					continue
 
 				# Add subject to subject pool if it passed criteria
-				if subject_id not in self.config.subject_pool:
-					self.config.subject_pool.append(subject_id) 
+				if subject_id not in self.subject_pool:
+					self.subject_pool.append(subject_id) 
 
-		subject_pool = '\n'.join(self.config.subject_pool)
-		print(f"\n\nSubject pool available for use...\n{subject_pool}\n")
+		# Print found subject pool to user
+		self.config.subject_pool = self.subject_pool
+		subject_pool = '\n'.join(self.subject_pool)
+		print(f"\n\nSubject pool available for use...\n{subject_pool}")
 		
 	def load(self, subjects = [], count = 0, session = '*', activation = 'linear', shuffle = False, jackknife = None, exclude_trained = False):
 		if len(subjects) > 0: count = len(subjects)
@@ -136,7 +138,7 @@ class BOLDnet:
 		# Plan out model structure
 		
 		if self.config.data_shape == None:
-			self.wrangler.wrangle(self.config.subject_pool, count = -1, session = 0, shape_extraction = True)
+			self.wrangler.wrangle(self.subject_pool, count = -1, session = 0, shape_extraction = True)
 		self.plan()
 
 		self.checkpoint_path = f"{self.config.project_directory}{self.config.model_directory}/model/ckpt.weights.h5"
@@ -246,8 +248,8 @@ class BOLDnet:
 				self.wrangle(self.subject_pool, self.jackknife)
 				self.build()
 				self.train()
-				self.plot_accuracy()
-				self.ROC()
+				self.lens.plot_accuracy()
+				self.lens.ROC()
 
 	def predict(self, x_range = None, subject_id = ""):
 		output = self.model.predict(self.x_test)
@@ -260,8 +262,8 @@ class BOLDnet:
 		else:
 			fileend = ".png"
 
-		plt.plot(x_range, [output[value] for value in x_range], label = 'Predicted Value', color = 'orange')
-		plt.plot(x_range, [self.y_test[value] for value in x_range], label = 'Actual Value', color = 'blue')
+		plt.plot(x_range, [output[value] for value in x_range], color = 'orange')
+		plt.plot(x_range, [self.y_test[value] for value in x_range], color = 'blue')
 		plt.legend()
 		plt.xlabel("Sample Volume")
 		plt.ylabel("Value")
@@ -270,6 +272,7 @@ class BOLDnet:
 		plt.close()
 		
 		plt.scatter(self.y_test, output, color='blue', label='Outcomes')
+		plt.plot(self.config.outputs, self.config.outputs, color='gray', linestyle='-', label="Unity Line")
 		plt.xlabel('Actual Emotional Valence')
 		plt.ylabel(f'Predicted Emotional Valence')
 		plt.title('Scatter Plot of Emotional Valence Predicted vs. Actual Outcomes')
@@ -295,29 +298,6 @@ class BOLDnet:
 			else:
 				print('BOLDnet not found...')
 				return False
-		
-
-class SqueezeAndExcitation(tf.keras.layers.Layer):
-    def __init__(self, reduction_ratio=16, **kwargs):
-        super(SqueezeAndExcitation, self).__init__(**kwargs)
-        self.reduction_ratio = reduction_ratio
-
-    def build(self, input_shape):
-        channels = input_shape[-1]
-        self.global_avg_pool = tf.keras.layers.GlobalAveragePooling3D()
-        self.dense1 = tf.keras.layers.Dense(channels // self.reduction_ratio, activation='relu')
-        self.dense2 = tf.keras.layers.Dense(channels, activation='sigmoid')
-        self.reshape = tf.keras.layers.Reshape((1, 1, 1, channels))
-        self.multiply = tf.keras.layers.Multiply()
-
-    def call(self, inputs):
-        # Squeeze
-        x = self.global_avg_pool(inputs)
-        x = self.dense1(x)
-        x = self.dense2(x)
-        x = self.reshape(x)
-        # Scale
-        return self.multiply([inputs, x])
 	
 class SpatialAttention(tf.keras.layers.Layer):
     def __init__(self, kernel_size=7, **kwargs):
