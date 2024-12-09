@@ -156,9 +156,8 @@ class BOLDnet:
 			self.model.add(SpatialAttention())
 			if layer + 1 < self.config.convolution_depth:
 				self.model.add(tf.keras.layers.MaxPooling3D(pool_size = self.config.pool_size, strides = self.config.pool_stride, padding = self.config.zero_padding, data_format = "channels_last"))
-		
-		if self.config.density_dropout[0] == True: # Add dropout between convolution and density layer
 			self.model.add(tf.keras.layers.Dropout(self.config.dropout))
+		
 		self.model.add(tf.keras.layers.Flatten()) # Create heavy top density layers
 		
 		for density, dense_dropout in zip(self.config.top_density, self.config.density_dropout[1:]):
@@ -267,15 +266,15 @@ class BOLDnet:
 		plt.legend()
 		plt.xlabel("Sample Volume")
 		plt.ylabel("Value")
-		plt.title(f"Predictions vs. Actual Emotional Valence for fMRI Images")
+		plt.title(f"Predictions vs. Actual {self.config.output_descriptor} for fMRI Images")
 		plt.savefig(f"{self.config.project_directory}{self.config.model_directory}/plots/prediction_vs_real_output{fileend}")
 		plt.close()
 		
 		plt.scatter(self.y_test, output, color='blue', label='Outcomes')
 		plt.plot(self.config.outputs, self.config.outputs, color='gray', linestyle='-', label="Unity Line")
-		plt.xlabel('Actual Emotional Valence')
-		plt.ylabel(f'Predicted Emotional Valence')
-		plt.title('Scatter Plot of Emotional Valence Predicted vs. Actual Outcomes')
+		plt.xlabel(f'Actual {self.config.output_descriptor}')
+		plt.ylabel(f'Predicted {self.config.output_descriptor}')
+		plt.title(f'Scatter Plot of {self.config.output_descriptor} Predicted vs. Actual Outcomes')
 		plt.savefig(f"{self.config.project_directory}{self.config.model_directory}/plots/prediction_vs_real_scatterplot{fileend}")
 		plt.close()
 
