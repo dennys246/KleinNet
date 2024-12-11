@@ -18,7 +18,7 @@ config = {
     "batch_size": 38,
     "negative_slope": 0.1,
     "epsilon": 1e-6,
-    "learning_rate": 0.0001,
+    "learning_rate": 0.001,
     "bias": 0,
     "dropout": 0.5,
     "momentum": 0.9,
