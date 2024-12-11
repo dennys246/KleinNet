@@ -156,11 +156,12 @@ class BOLDnet:
 			self.model.add(SpatialAttention())
 			if layer + 1 < self.config.convolution_depth:
 				self.model.add(tf.keras.layers.MaxPooling3D(pool_size = self.config.pool_size, strides = self.config.pool_stride, padding = self.config.zero_padding, data_format = "channels_last"))
-			self.model.add(tf.keras.layers.Dropout(self.config.dropout))
+			if self.config.dropout:
+				self.model.add(tf.keras.layers.Dropout(self.config.dropout))
 		
 		self.model.add(tf.keras.layers.Flatten()) # Create heavy top density layers
 		
-		for density, dense_dropout in zip(self.config.top_density, self.config.density_dropout[1:]):
+		for density, dense_dropout in zip(self.config.top_density, self.config.density_dropout):
 			self.model.add(tf.keras.layers.Dense(density, use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias))) # Density layer based on population size of V1 based on Full-density multi-scale account of structure and dynamics of macaque visual cortex by Albada et al.
 			self.model.add(tf.keras.layers.LeakyReLU(self.config.negative_slope))
 			if dense_dropout == True:
