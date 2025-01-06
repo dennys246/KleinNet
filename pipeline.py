@@ -4,6 +4,8 @@ import numpy as np
 import nibabel as nib
 import nibabel as nib
 from glob import glob
+from scipy.signal import fftconvolve
+from scipy.stats import gamma
 
 class wrangler:
 	def __init__(self, config):
@@ -37,7 +39,7 @@ class wrangler:
 
 			# If we've run out of subjects but need more
 			if subjects == []: 
-				subject = self.config.subject_pool.pop(random.randint(0, len(self.config.subject_pool)))
+				subject = self.config.subject_pool.pop(random.randint(0, len(self.config.subject_pool) - 1))
 			else: # Grab the first subject in our passes subject list
 				subject = subjects.pop(0)
 			print(subject)
@@ -129,12 +131,16 @@ class wrangler:
 	
 		# Grab images header/meta data
 		header = image_file.header 
+		self.config.header = header
 	
 		# Grab image shape and affine from header
 		image_shape = header.get_data_shape() 
 
-        # Reshape image to have time dimension as first dimension and add channel dimension
-		image = image_file.get_fdata().reshape(image_shape[3], image_shape[0], image_shape[1], image_shape[2], 1)
+        # Grab data
+		image = image_file.get_fdata()
+
+		# Reshape image to have time dimension as first dimension and add channel dimension
+		image = image.reshape(image_shape[3], image_shape[0], image_shape[1], image_shape[2], 1)
 		if self.config.data_shape == None:
 			self.config.data_shape = image.shape[1:-1]
 			print(f"Data shape: {self.config.data_shape}")
@@ -225,6 +231,7 @@ class wrangler:
 
 		# Pass back normalized array
 		return 2 * (array - array_min) / (array_max - array_min) - 1
+
 
 	def mean_filter(self, image, filter_size):
 		return
