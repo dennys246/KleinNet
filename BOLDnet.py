@@ -83,7 +83,7 @@ class BOLDnet:
 		subject_pool = '\n'.join(self.subject_pool)
 		print(f"\n\nSubject pool available for use...\n{subject_pool}")
 		
-	def load(self, subjects = [], count = 0, session = '*', activation = 'linear', shuffle = False, jackknife = None, exclude_trained = False):
+	def load(self, subjects = [], count = 0, session = '*', activation = 'linear', shuffle = False, jackknife = None, exclude_trained = True):
 		if len(subjects) > 0: count = len(subjects)
 
 		if count >= 0:
