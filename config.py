@@ -3,6 +3,7 @@ from glob import glob
 
 config = {
     "data_shape": None,
+    "header": None,
     "subject_pool": [],
     "previously_run": [],
     "excluded_subjects": [],
@@ -87,11 +88,12 @@ class build:
             config_json = json.load(config_file)
         return config_json
 
-    def configure(self, data_shape, subject_pool, previously_run, excluded_subjects, bids_directory, bold_identifier, label_identifier, project_directory, model_directory, checkpoint_path, model_history, tool, shuffle, epochs, batch_size, negative_slope, epsilon, learning_rate, bias, dropout, momentum, kernel_initializer, convolution_depth, init_filter_count, kernel_size, kernel_stride, zero_padding, padding, pool_size, pool_stride, top_density, density_dropout, output_activation, outputs, outputs_category, output_descriptor, output_unit, history_types, optimizers, optimizer, use_nestrov, use_amsgrad, loss, rebuild):
+    def configure(self, data_shape, header, subject_pool, previously_run, excluded_subjects, bids_directory, bold_identifier, label_identifier, project_directory, model_directory, checkpoint_path, model_history, tool, shuffle, epochs, batch_size, negative_slope, epsilon, learning_rate, bias, dropout, momentum, kernel_initializer, convolution_depth, init_filter_count, kernel_size, kernel_stride, zero_padding, padding, pool_size, pool_stride, top_density, density_dropout, output_activation, outputs, outputs_category, output_descriptor, output_unit, history_types, optimizers, optimizer, use_nestrov, use_amsgrad, loss, rebuild):
 		#-------------------------------- Model Set-Up -------------------------------#
 		#These initial variables are used by BOLDnet and won't need to be set to anything
         
         self.data_shape = data_shape
+        self.header = header
         self.subject_pool = subject_pool
         self.previously_run = previously_run
         self.excluded_subjects = excluded_subjects
@@ -237,6 +239,7 @@ class build:
     def dump(self):
         config = {
             "data_shape": self.data_shape,
+            "header": self.header,
             "subject_pool": self.subject_pool,
             "previously_run": self.previously_run,
             "excluded_subjects": self.excluded_subjects,
