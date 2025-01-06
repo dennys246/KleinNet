@@ -171,6 +171,12 @@ class BOLDnet:
 		self.model.build()
 		self.model.summary()
 
+		if self.config.learning_rate == 'cos':
+			self.config.learning_rate = tf.keras.optimizers.schedules.CosineDecay(
+				initial_learning_rate=self.config.learning_rate,
+				decay_steps=10000  # Total steps to reach the minimum learning rate
+			)
+
 		if self.config.optimizer == 'Adam':
 			optimizer = tf.keras.optimizers.Adam(learning_rate = self.config.learning_rate, epsilon = self.config.epsilon, amsgrad = self.config.use_amsgrad)
 		if self.config.optimizer == 'SGD':
