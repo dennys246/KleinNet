@@ -68,6 +68,7 @@ class build:
             else:
                 config_file = config_files[0]
             config_json = self.load_config(config_file)
+        
         config_json = config_json or config # Use passed in config or default config
 
         self.configure(**config_json) # Build configuration
