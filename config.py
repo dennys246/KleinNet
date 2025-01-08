@@ -32,7 +32,7 @@ config = {
     "padding": [0, 0, 0],
     "pool_size": [2, 2, 2],
     "pool_stride": [2, 2, 2],
-    "top_density": [100, 40, 20],
+    "top_density": [100, 40, 20], # Change name, top density seems excessive?
     "density_dropout": [False, False, False],
     "output_activation": "linear",
     "outputs": [-1.0, 1.0],
