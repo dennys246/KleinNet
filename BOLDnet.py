@@ -185,11 +185,11 @@ class BOLDnet:
 		if self.config.output_activation == 'linear': # Compile model for regression task
 			self.config.loss = 'mse'
 			self.config.history_types = ['loss']
-			self.model.compile(optimizer = optimizer, loss = self.config.loss) # Compile model
+			self.model.compile(optimizer = optimizer, loss = self.config.loss, run_eagerly=True) # Compile model
 		else: # Else compile model for classification
 			self.config.loss = 'binary_crossentropy'
 			self.config.history_types = ['accuracy', 'loss']
-			self.model.compile(optimizer = optimizer, loss = self.config.loss, metrics = ['accuracy', 'loss']) # Compile mode
+			self.model.compile(optimizer = optimizer, loss = self.config.loss, metrics = ['accuracy', 'loss'], run_eagerly=True) # Compile mode
 
 		print(f'\nBOLDnet model compiled using {self.config.optimizer}')
 
@@ -306,35 +306,38 @@ class BOLDnet:
 				return False
 	
 class SpatialAttention(tf.keras.layers.Layer):
-    def __init__(self, kernel_size=7, **kwargs):
-        super(SpatialAttention, self).__init__(**kwargs)
-        self.kernel_size = kernel_size
+	def __init__(self, kernel_size=7, **kwargs):
+		super(SpatialAttention, self).__init__(**kwargs)
+		self.kernel_size = kernel_size
+		
+	def build(self, input_shape):
+		self.concat = tf.keras.layers.Concatenate(axis=-1)
+		self.multiply = tf.keras.layers.Multiply()
+		
+		self.conv = tf.keras.layers.Conv3D(
+			filters=1, 
+			kernel_size=(1, self.kernel_size, self.kernel_size), 
+			strides=1, 
+			padding="same", 
+			activation="sigmoid"
+		)
 
-    def build(self, input_shape):
-        self.conv = tf.keras.layers.Conv3D(
-            filters=1, 
-            kernel_size=(1, self.kernel_size, self.kernel_size), 
-            strides=1, 
-            padding="same", 
-            activation="sigmoid"
-        )
+	def call(self, inputs):
+		# Calculate average-pooling and max-pooling
+		avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)
+		max_pool = tf.reduce_max(inputs, axis=-1, keepdims=True)
 
-    def call(self, inputs):
-        # Calculate average-pooling and max-pooling
-        avg_pool = tf.reduce_mean(inputs, axis=-1, keepdims=True)
-        max_pool = tf.reduce_max(inputs, axis=-1, keepdims=True)
+		# Concatenate pooled tensors
+		concat = self.concat([avg_pool, max_pool]) 
 
-        # Concatenate pooled tensors
-        concat = tf.keras.layers.Concatenate(axis=-1)([avg_pool, max_pool]) 
+		# Compute spatial attention map
+		attention = self.conv(concat)
 
-        # Compute spatial attention map
-        attention = self.conv(concat) 
+		# Scale by attention map
+		output = self.multiply([inputs, attention])
+		return output
 
-        # Scale by attention map
-        output = tf.keras.layers.Multiply()([inputs, attention])
-        return output
-
-    def get_config(self):
-        config = super(SpatialAttention, self).get_config()
-        config.update({"kernel_size": self.kernel_size})
-        return config
+	def get_config(self):
+		config = super(SpatialAttention, self).get_config()
+		config.update({"kernel_size": self.kernel_size})
+		return config
