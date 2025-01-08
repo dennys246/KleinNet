@@ -151,8 +151,8 @@ class BOLDnet:
 		
 		for layer in range(self.config.convolution_depth): # Build the layer on convolutions based on config convolution depth indicated
 			self.model.add(tf.keras.layers.Conv3D(self.filter_counts[layer], self.config.kernel_size, strides = self.config.kernel_stride, padding = self.config.zero_padding, use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias)))
-			self.model.add(tf.keras.layers.LeakyReLU(self.config.negative_slope))
 			self.model.add(tf.keras.layers.BatchNormalization())
+			self.model.add(tf.keras.layers.LeakyReLU(self.config.negative_slope))
 			self.model.add(SpatialAttention())
 			if layer + 1 < self.config.convolution_depth:
 				self.model.add(tf.keras.layers.MaxPooling3D(pool_size = self.config.pool_size, strides = self.config.pool_stride, padding = self.config.zero_padding, data_format = "channels_last"))
