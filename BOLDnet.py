@@ -180,9 +180,11 @@ class BOLDnet:
 
 		if self.config.optimizer == 'Adam':
 			optimizer = tf.keras.optimizers.Adam(learning_rate = self.config.learning_rate, epsilon = self.config.epsilon, amsgrad = self.config.use_amsgrad)
-		if self.config.optimizer == 'SGD':
+		elif self.config.optimizer == 'SGD':
 			optimizer = tf.keras.optimizers.SGD(learning_rate = self.config.learning_rate, momentum = self.config.momentum, nesterov = self.config.use_nestrov)
-		
+		else:
+			optimizer = self.config.optimizer
+
 		if self.config.output_activation == 'linear': # Compile model for regression task
 			self.config.loss = 'mse'
 			self.config.history_types = ['loss']
