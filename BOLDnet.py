@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from glob import glob
 
 class BOLDnet:
+	
 	def __init__(self, network_folder = None):
 
 		self.config = config.build(network_folder) or config.build() # Load default configuration
@@ -114,21 +115,21 @@ class BOLDnet:
 		print(f"Convolution Shape: {conv_shape}")
 		for depth in range(self.config.convolution_depth):
 			if depth > 0:
-				conv_shape = self.calcConv(conv_shape)
+				conv_shape = self.calc_conv(conv_shape)
 			self.layer_shapes.append(conv_shape)
 			self.output_layers.append(conv_layer)
 			conv_layer += 1
 			if depth < self.config.convolution_depth - 1:
-				conv_shape = self.calcMaxPool(conv_shape)
+				conv_shape = self.calc_maxpool(conv_shape)
 
 		self.new_shapes = []
 		print(f'Layer shapes...\n{self.layer_shapes}')
 		for layer_ind, conv_shape in enumerate(self.layer_shapes):
-			new_shape = self.calcConvTrans(conv_shape)
+			new_shape = self.calc_convtrans(conv_shape)
 			for layer in range(layer_ind,  0, -1):
-				new_shape = self.calcConvTrans(new_shape)
+				new_shape = self.calc_convtrans(new_shape)
 				if layer != 1:
-					new_shape = self.calcUpSample(new_shape)
+					new_shape = self.calc_upsample(new_shape)
 			self.new_shapes.append(new_shape)
 
 		for layer, plan in enumerate(zip(self.output_layers, self.filter_counts, self.layer_shapes, self.new_shapes)):
@@ -210,19 +211,19 @@ class BOLDnet:
 											save_weights_only=True,
 											verbose=1)]
 
-	def calcConv(self, shape):
+	def calc_conv(self, shape):
 		return [(input_length - filter_length + (2*pad))//stride + 1 for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
 
-	def calcMaxPool(self, shape):
+	def calc_maxpool(self, shape):
 		return [(input_length - pool_length + (2*pad))//stride + 1 for input_length, pool_length, stride, pad in zip(shape, self.config.pool_size, self.config.pool_stride, self.config.padding)]
 
-	def calcConvTrans(self, shape):
+	def calc_convtrans(self, shape):
 		if self.config.zero_padding == 'valid':
 			return [(input_length - 1)*stride + filter_length for input_length, filter_length, stride in zip(shape, self.config.kernel_size, self.config.kernel_stride)]
 		else:
 			return [(input_length - 1)*stride + filter_length - 2*pad for input_length, filter_length, stride, pad in zip(shape, self.config.kernel_size, self.config.kernel_stride, self.config.padding)]
 
-	def calcUpSample(self, shape):
+	def calc_upsample(self, shape):
 		return [input_length * self.config.pool_stride[0] for input_length in shape]
 
 	def train(self):
@@ -247,15 +248,6 @@ class BOLDnet:
 		print(f"Test History: {self.history}")
 		for history_type in self.config.history_types: # Save test history
 			self.config.model_history[f"val_{history_type}"] += self.history.history[f"val_{history_type}"]
-
-	def jack_knife(self, Range = None):
-			for self.jackknife in self.subject_pool:
-				print(f"Running Jack-Knife on Subject {str(self.jackknife)}")
-				self.wrangle(self.subject_pool, self.jackknife)
-				self.build()
-				self.train()
-				self.lens.plot_accuracy()
-				self.lens.ROC()
 
 	def predict(self, x_range = None, subject_id = ""):
 		output = self.model.predict(self.x_test)
@@ -284,6 +276,15 @@ class BOLDnet:
 		plt.title(f'Scatter Plot of {self.config.output_descriptor} Predicted vs. Actual Outcomes')
 		plt.savefig(f"{self.config.project_directory}{self.config.model_directory}/plots/prediction_vs_real_scatterplot{fileend}")
 		plt.close()
+
+	def jack_knife(self, Range = None):
+			for self.jackknife in self.subject_pool:
+				print(f"Running Jack-Knife on Subject {str(self.jackknife)}")
+				self.wrangle(self.subject_pool, self.jackknife)
+				self.build()
+				self.train()
+				self.lens.plot_accuracy()
+				self.lens.ROC()
 
 	def save(self):
 		if self.model != None:
