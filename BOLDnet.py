@@ -160,6 +160,7 @@ class BOLDnet:
 			if self.config.dropout:
 				self.model.add(tf.keras.layers.Dropout(self.config.dropout))
 		
+		self.model.add(tf.keras.layers.GlobalMaxPooling3D())
 		self.model.add(tf.keras.layers.Flatten()) # Create heavy top density layers
 		
 		for density, dense_dropout in zip(self.config.top_density, self.config.density_dropout):
@@ -188,7 +189,7 @@ class BOLDnet:
 		if self.config.output_activation == 'linear': # Compile model for regression task
 			self.config.loss = 'mse'
 			self.config.history_types = ['loss']
-			self.model.compile(optimizer = optimizer, loss = self.config.loss, run_eagerly=True) # Compile model
+			self.model.compile(optimizer = optimizer, loss = self.config.loss, run_eagerly = True) # Compile model
 		else: # Else compile model for classification
 			self.config.loss = 'binary_crossentropy'
 			self.config.history_types = ['accuracy', 'loss']
