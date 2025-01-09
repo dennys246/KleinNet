@@ -160,7 +160,7 @@ class BOLDnet:
 			if self.config.dropout:
 				self.model.add(tf.keras.layers.Dropout(self.config.dropout))
 		
-		self.model.add(tf.keras.layers.GlobalMaxPooling3D())
+		self.model.add(tf.keras.layers.GlobalAveragePooling3D())
 		self.model.add(tf.keras.layers.Flatten()) # Create heavy top density layers
 		
 		for density, dense_dropout in zip(self.config.top_density, self.config.density_dropout):
