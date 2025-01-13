@@ -159,8 +159,7 @@ class BOLDnet:
 				self.model.add(tf.keras.layers.MaxPooling3D(pool_size = self.config.pool_size, strides = self.config.pool_stride, padding = self.config.zero_padding, data_format = "channels_last"))
 			if self.config.dropout:
 				self.model.add(tf.keras.layers.Dropout(self.config.dropout))
-		
-		self.model.add(tf.keras.layers.GlobalMaxPooling3D())
+
 		self.model.add(tf.keras.layers.Flatten()) # Create heavy top density layers
 		
 		for density, dense_dropout in zip(self.config.top_density, self.config.density_dropout):
@@ -345,3 +344,38 @@ class SpatialAttention(tf.keras.layers.Layer):
 		config = super(SpatialAttention, self).get_config()
 		config.update({"kernel_size": self.kernel_size})
 		return config
+
+
+class MultiScalePooling(tf.keras.layers.Layer):
+	def __init__(self, **kwargs):
+		super(MultiScalePooling, self).__init__(**kwargs)
+		# Define the pooling layers with different kernel sizes
+		self.pool1 = tf.keras.layers.MaxPooling3D(pool_size = (2, 2, 2), strides = (2, 2, 2), padding='same')
+		self.pool2 = tf.keras.layers.MaxPooling3D(pool_size = (4, 4, 4), strides = (4, 4, 4), padding='same')
+		self.pool3 = tf.keras.layers.AveragePooling3D(pool_size = (2, 2, 2), strides = (2, 2, 2), padding='same')
+		self.small_upsample = tf.keras.layers.UpSampling3D(size = (2, 2, 2))
+		self.large_upsample = tf.keras.layers.UpSampling3D(size = (4, 4, 4))
+
+	def call(self, inputs):
+		# Apply the pooling operations
+		pooled1 = self.pool1(inputs)
+		pooled2 = self.pool2(inputs)
+		pooled3 = self.pool3(inputs)
+
+		# Reshape so all pools are the same size
+		pooled2_resized = self.large_upsample(pooled2) 
+		pooled3_resized = self.small_upsample(pooled3)
+
+		# Concatenate the outputs along the channel axis
+		return tf.keras.layers.Concatenate(axis=-1)([pooled1, pooled2_resized, pooled3_resized])
+	
+	def compute_output_shape(self, input_shape):
+		# Compute output shape for the layer
+		pooled_shape = (
+			input_shape[0],  # Batch size
+			input_shape[1] // 2,  # Depth reduced by pool1
+			input_shape[2] // 2,  # Height reduced by pool1
+			input_shape[3] // 2,  # Width reduced by pool1
+			input_shape[4] * 3   # Concatenated channels
+			)
+		return pooled_shape
