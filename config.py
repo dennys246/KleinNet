@@ -3,7 +3,6 @@ from glob import glob
 
 config = {
     "data_shape": None,
-    "header": None,
     "subject_pool": [],
     "previously_run": [],
     "excluded_subjects": [],
@@ -32,6 +31,7 @@ config = {
     "padding": [0, 0, 0],
     "pool_size": [2, 2, 2],
     "pool_stride": [2, 2, 2],
+    "multiscale_pooling": False,
     "top_density": [100, 40, 20], # Change name, top density seems excessive?
     "density_dropout": [False, False, False],
     "output_activation": "linear",
@@ -89,12 +89,11 @@ class build:
             config_json = json.load(config_file)
         return config_json
 
-    def configure(self, data_shape, header, subject_pool, previously_run, excluded_subjects, bids_directory, bold_identifier, label_identifier, project_directory, model_directory, checkpoint_path, model_history, tool, shuffle, epochs, batch_size, negative_slope, epsilon, learning_rate, bias, dropout, momentum, kernel_initializer, convolution_depth, init_filter_count, kernel_size, kernel_stride, zero_padding, padding, pool_size, pool_stride, top_density, density_dropout, output_activation, outputs, outputs_category, output_descriptor, output_unit, history_types, optimizers, optimizer, use_nestrov, use_amsgrad, loss, rebuild):
+    def configure(self, data_shape, subject_pool, previously_run, excluded_subjects, bids_directory, bold_identifier, label_identifier, project_directory, model_directory, checkpoint_path, model_history, tool, shuffle, epochs, batch_size, negative_slope, epsilon, learning_rate, bias, dropout, momentum, kernel_initializer, convolution_depth, init_filter_count, kernel_size, kernel_stride, zero_padding, padding, pool_size, pool_stride, multiscale_pooling, top_density, density_dropout, output_activation, outputs, outputs_category, output_descriptor, output_unit, history_types, optimizers, optimizer, use_nestrov, use_amsgrad, loss, rebuild):
 		#-------------------------------- Model Set-Up -------------------------------#
 		#These initial variables are used by BOLDnet and won't need to be set to anything
         
         self.data_shape = data_shape
-        self.header = header
         self.subject_pool = subject_pool
         self.previously_run = previously_run
         self.excluded_subjects = excluded_subjects
@@ -190,6 +189,13 @@ class build:
         self.pool_size = pool_size
         self.pool_stride = pool_stride
 
+        # Multiscale pooling - The Multiscale pooling block can be added after the final 
+        # convolutional block to capture spatial feature's on different scales. This can
+        # be useful in a number of situations like when analyzing data in non-standardized
+        # space or different age groups like infants, children and adults.
+
+        self.multiscale_pooling = multiscale_pooling
+
 		# Top Density Layer(s) - The following variables are used to define the structure
 		# of the top density. The top_density variable holds the sizes of each layer were
 		# the density_dropout layer defines whether there is dropout moving into that layer.
@@ -240,7 +246,6 @@ class build:
     def dump(self):
         config = {
             "data_shape": self.data_shape,
-            "header": self.header,
             "subject_pool": self.subject_pool,
             "previously_run": self.previously_run,
             "excluded_subjects": self.excluded_subjects,
@@ -270,6 +275,7 @@ class build:
             "padding": self.padding,
             "pool_size": self.pool_size,
             "pool_stride": self.pool_stride,
+            "multiscale_pooling": self.multiscale_pooling,
             "top_density": self.top_density,
             "density_dropout": self.density_dropout,
             "output_activation": self.output_activation,
