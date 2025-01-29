@@ -160,10 +160,10 @@ class BOLDnet:
 			if self.config.dropout:
 				self.model.add(tf.keras.layers.Dropout(self.config.dropout))
 
-		if self.config.multiscale:
+		if self.config.multiscale_pooling:
 			self.model.add(MultiScalePooling())
 
-		self.model.add(tf.keras.layers.Flatten()) # Create heavy top density layers
+		self.model.add(tf.keras.layers.Flatten()) # Create top density layers
 		
 		for density, dense_dropout in zip(self.config.top_density, self.config.density_dropout):
 			self.model.add(tf.keras.layers.Dense(density, use_bias = True, kernel_initializer = self.config.kernel_initializer, bias_initializer = tf.keras.initializers.Constant(self.config.bias))) # Density layer based on population size of V1 based on Full-density multi-scale account of structure and dynamics of macaque visual cortex by Albada et al.
