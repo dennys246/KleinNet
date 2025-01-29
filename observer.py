@@ -20,7 +20,7 @@ class lens:
 		return
 
 	def plot_accuracy(self, i = 1):
-		print("\nEvaluating BOLDnet model accuracy & loss...")
+		print("\nEvaluating NeuroNet model accuracy & loss...")
 		for history_type in self.config.history_types:		# Evaluate the model accuracy and loss
 			plt.plot(self.config.model_history[history_type], label=history_type)
 			plt.plot(self.config.model_history[f"val_{history_type}"], label = f'validation {history_type}')
@@ -57,7 +57,7 @@ class lens:
 
 		print(f"\nObserving {self.category} outcome structure")
 
-		print(f"\nExtracting {interest} answer features from BOLDnet convolutional layers...")
+		print(f"\nExtracting {interest} answer features from NeuroNet convolutional layers...")
 		self.output_layers, self.filter_counts, self.layer_shapes, self.new_shapes
 		layer_outputs = [layer.output for layer in self.model.layers[:]]
 		layer_names = [layer.name for layer in self.model.layers if layer.name[:6] == 'conv3d']
@@ -91,7 +91,7 @@ class lens:
 				feature_map = (self.feature_maps[:, :, :, map_index].reshape(self.current_shape[0], self.current_shape[1], self.current_shape[2])) # Grab Feature map
 				deconv_feature_map = self.deconv_model.predict(self.feature_maps[:, :, :, map_index].reshape(1, self.current_shape[0], self.current_shape[1], self.current_shape[2], 1)).reshape(self.new_shape[0], self.new_shape[1], self.new_shape[2])
 				self.plot_all(deconv_feature_map, 'DeConv_Feature_Maps', map_index)
-			print(f"\n\nExtracting BOLDnet model class activation maps for layer {self.layer}")
+			print(f"\n\nExtracting NeuroNet model class activation maps for layer {self.layer}")
 			
 			with tf.GradientTape() as gtape: # Create CAM
 				conv_output, predictions = self.activation_model(self.sample)

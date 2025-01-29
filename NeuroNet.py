@@ -1,10 +1,10 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-import os, atexit, pipeline, observer, config
+import os, atexit, pipeline, observer, config, psutil
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from glob import glob
 
-class BOLDnet:
+class NeuroNet:
 	
 	def __init__(self, network_folder = None):
 
@@ -21,8 +21,7 @@ class BOLDnet:
 
 		atexit.register(self.save) # Set up force save model before exiting
 
-		print("\n - BOLDnet Initialized -\n - Process PID - " + str(os.getpid()) + ' -\n')
-	
+		print("\n - NeuroNet Initialized -\n - Process PID - " + str(os.getpid()) + ' -\n')
 	
 	def orient(self, bids_directory, bold_identifier, label_identifier, exclude_trained = False):
 		self.wrangler.create_dir()
@@ -34,7 +33,7 @@ class BOLDnet:
 
 		# Grab all available subjects with fMRIPrep data
 		self.subject_pool = []
-		print(f"\nOrienting and generating BOLDnet lexicons for bids directory {self.config.bids_directory}...")
+		print(f"\nOrienting and generating NeuroNet lexicon for bids directory {self.config.bids_directory}...")
 		
 		# Generate a lexicon of all potential subjects
 		lexicon = [item for item in glob(f"{self.config.bids_directory}/derivatives/{self.config.tool}/sub-*") if os.path.isdir(item)]
@@ -98,7 +97,7 @@ class BOLDnet:
 		return True
 
 	def plan(self):
-		print("\nPlanning BOLDnet model structure")
+		print("\nPlanning NeuroNet model structure")
 		# initialize an empty list to store layer filter counts
 		self.filter_counts = []
 		
@@ -144,7 +143,7 @@ class BOLDnet:
 
 		self.checkpoint_path = f"{self.config.project_directory}{self.config.model_directory}/model/ckpt.weights.h5"
 
-		print('\nConstructing BOLDnet model')
+		print('\nConstructing NeuroNet model')
 		self.model = tf.keras.models.Sequential() # Create first convolutional layer
 
 		# Add in initial input layer
@@ -197,11 +196,11 @@ class BOLDnet:
 			self.config.history_types = ['accuracy', 'loss']
 			self.model.compile(optimizer = optimizer, loss = self.config.loss, metrics = ['accuracy', 'loss'], run_eagerly=True) # Compile mode
 
-		print(f'\nBOLDnet model compiled using {self.config.optimizer}')
+		print(f'\nNeuroNet model compiled using {self.config.optimizer}')
 
 		# Check if a model already exists and load	
 		if self.load_model():
-			print('BOLDnet weights and history loaded...')
+			print('NeuroNet weights and history loaded...')
 		else: # Else save new weights to checkpoint path
 			if os.path.exists(self.checkpoint_path) == False or self.config.rebuild == True:
 				self.model.save_weights(self.checkpoint_path)
@@ -302,15 +301,34 @@ class BOLDnet:
 				#try:
 				self.model.load_weights(self.checkpoint_path)
 				self.config.load_config()
-				print('BOLDnet loaded successfully')
+				print('NeuroNet loaded successfully')
 				return True
 				#except:
-				#	print('BOLDnet weights and history failed to load...')
+				#	print('NeuroNet weights and history failed to load...')
 				#	return False
 			else:
-				print('BOLDnet not found...')
+				print('NeuroNet not found...')
 				return False
 	
+	def display_memory(self):
+		# Get the memory information
+		memory = psutil.virtual_memory()
+		swap = psutil.swap_memory()
+
+		# Display RAM usage
+		print("---- System Memory (RAM) ----")
+		print(f"Total RAM: {memory.total / (1024 ** 3):.2f} GB")
+		print(f"Available RAM: {memory.available / (1024 ** 3):.2f} GB")
+		print(f"Used RAM: {memory.used / (1024 ** 3):.2f} GB")
+		print(f"RAM Usage: {memory.percent}%")
+
+		# Display swap memory usage
+		print("\n---- Swap Memory ----")
+		print(f"Total Swap: {swap.total / (1024 ** 3):.2f} GB")
+		print(f"Used Swap: {swap.used / (1024 ** 3):.2f} GB")
+		print(f"Free Swap: {swap.free / (1024 ** 3):.2f} GB")
+		print(f"Swap Usage: {swap.percent}%")
+
 class SpatialAttention(tf.keras.layers.Layer):
 	def __init__(self, kernel_size=7, **kwargs):
 		super(SpatialAttention, self).__init__(**kwargs)

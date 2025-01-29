@@ -30,6 +30,8 @@ class wrangler:
 		
 		# Define variables to hold subject data
 		images = np.array([])
+		labels = np.array([])
+
 		test_indices = []
 		train_indices = []
 		train_test_mod = 0

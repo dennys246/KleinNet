@@ -2,6 +2,8 @@ import json, atexit
 from glob import glob
 
 config = {
+    "dataset": "Study",
+    "architecture": "NeuroNet",
     "data_shape": None,
     "subject_pool": [],
     "previously_run": [],
@@ -9,7 +11,7 @@ config = {
     "bids_directory": None,
     "bold_identifier": None,
 	"label_identifier":None,
-    "project_directory": "boldnet/",
+    "project_directory": "neuronet/",
     "model_directory": "run_1",
     "checkpoint_path": None,
     "tool": "fmriprep",
@@ -89,19 +91,20 @@ class build:
             config_json = json.load(config_file)
         return config_json
 
-    def configure(self, data_shape, subject_pool, previously_run, excluded_subjects, bids_directory, bold_identifier, label_identifier, project_directory, model_directory, checkpoint_path, model_history, tool, shuffle, epochs, batch_size, negative_slope, epsilon, learning_rate, bias, dropout, momentum, kernel_initializer, convolution_depth, init_filter_count, kernel_size, kernel_stride, zero_padding, padding, pool_size, pool_stride, multiscale_pooling, top_density, density_dropout, output_activation, outputs, outputs_category, output_descriptor, output_unit, history_types, optimizers, optimizer, use_nestrov, use_amsgrad, loss, rebuild):
+    def configure(self, dataset, architecture, data_shape, subject_pool, previously_run, excluded_subjects, bids_directory, bold_identifier, label_identifier, project_directory, model_directory, checkpoint_path, model_history, tool, shuffle, epochs, batch_size, negative_slope, epsilon, learning_rate, bias, dropout, momentum, kernel_initializer, convolution_depth, init_filter_count, kernel_size, kernel_stride, zero_padding, padding, pool_size, pool_stride, multiscale_pooling, top_density, density_dropout, output_activation, outputs, outputs_category, output_descriptor, output_unit, history_types, optimizers, optimizer, use_nestrov, use_amsgrad, loss, rebuild):
 		#-------------------------------- Model Set-Up -------------------------------#
-		#These initial variables are used by BOLDnet and won't need to be set to anything
-        
+		#These initial variables are used by NeuroNet and won't need to be set to anything
+        self.dataset = dataset
+        self.architecture = architecture
         self.data_shape = data_shape
         self.subject_pool = subject_pool
         self.previously_run = previously_run
         self.excluded_subjects = excluded_subjects
 		
         # Folder Structure - These variables are used to desribes where data is stored
-		# along with where to store the outputs of BOLDnet. The results directory is
+		# along with where to store the outputs of NeuroNet. The results directory is
 		# a general folder where specific model run folder will be created. The run
-		# directory is the specific folder BOLDnet will generate and output results into.
+		# directory is the specific folder NeuroNet will generate and output results into.
         
         self.bids_directory = bids_directory
         self.bold_identifier = bold_identifier
@@ -132,8 +135,8 @@ class build:
 		# Model Hyperparameters - Hyperparameters used within the models algorithms to
 		# to learn about the dataset. These values were found while optimizing the model
 		# over a simple stroop dataset so consider using the optiimize function within
-		# the BOLDnet library to find optimum values. Bias can be a bit tricky to optimize
-		# and I would recommend using the BOLDnet.optimum_bias() to find bias when using
+		# the NeuroNet library to find optimum values. Bias can be a bit tricky to optimize
+		# and I would recommend using the NeuroNet.optimum_bias() to find bias when using
 		# an inbalanced dataset. Hyperparameter descriptors to be added with GUI.
 		
         self.negative_slope = negative_slope # Formally known as alpha 
@@ -151,15 +154,15 @@ class build:
 		
         self.kernel_initializer = kernel_initializer
 
-		# Convolution Depth - BOLDnet is built to use a basic convolution layer structure
+		# Convolution Depth - NeuroNet is built to use a basic convolution layer structure
 		# that is stacked based on how deep the model is indicated her. Having the depth
 		# set at 2 meaning will cause the model to build 2 convolutions layers from
-		# the convolution template in the BOLDnet.build() function before building the top density
+		# the convolution template in the NeuroNet.build() function before building the top density
 		
         self.convolution_depth = convolution_depth
 
-		# Initial Filter Count - BOLDnet convolution layer filter sizes are calculated
-		# within the BOLDnet.plan() function using a common machine learning rule of
+		# Initial Filter Count - NeuroNet convolution layer filter sizes are calculated
+		# within the NeuroNet.plan() function using a common machine learning rule of
 		# doubling filter count per convolution layer. init_filter_count is the initial
 		# value the filters starts on before doubling.
 		
@@ -201,7 +204,7 @@ class build:
 		# the density_dropout layer defines whether there is dropout moving into that layer.
 		# You might notice that the density_dropout variables hold an extra value conpared
 		# to the top_density variable and this is to account for the flattening layer that
-		# is automatically built within the BOLDnet.build() function. The first value of
+		# is automatically built within the NeuroNet.build() function. The first value of
 		# density_dropout[0] corresponds to dropout applied to the flatterning layer.
 		
         self.top_density = top_density
@@ -210,7 +213,7 @@ class build:
 
 		# Outputs - The output variables are used to help the model process and understand what it
 		# is classifying and help it display some of the output better. These variables are
-		# also used within BOLDnet.build() to create the output layer. The output activation
+		# also used within NeuroNet.build() to create the output layer. The output activation
 		# is used to decide what activation the model will us in it's output layer.
 		
         self.output_activation = output_activation
@@ -231,13 +234,13 @@ class build:
         self.use_amsgrad = use_amsgrad # If using Adam optimizer
 
 		# Loss - This variable describes the loss calculation used within the model.
-		# the standard used while initially building BOLDnet was binary crossentropy
+		# the standard used while initially building NeuroNet was binary crossentropy
 		# however you may need to change this based on the questions you are asking.
         
         self.loss = loss
 		
 		#--------------------------------- Rebuild Model ----------------------------##
-		# This variable defines wether a new model will be build each time BOLDnet is 
+		# This variable defines wether a new model will be build each time NeuroNet is 
 		# called. It can be useful to set this to True when initially setting up the model
 		# so the model will be rebuilt with new configurations.
 		
@@ -245,6 +248,8 @@ class build:
 
     def dump(self):
         config = {
+            "dataset": self.dataset,
+            "architecture": self.architecture,
             "data_shape": self.data_shape,
             "subject_pool": self.subject_pool,
             "previously_run": self.previously_run,
