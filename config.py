@@ -15,7 +15,7 @@ config = {
     "tool": "fmriprep",
     "shuffle": False,
     "epochs": 10,
-    "batch_size": 38,
+    "batch_size": 36,
     "negative_slope": 0.1,
     "epsilon": 1e-6,
     "learning_rate": 0.001,
@@ -24,7 +24,7 @@ config = {
     "momentum": 0.9,
     "kernel_initializer": "glorot_uniform",
     "convolution_depth": 2,
-    "init_filter_count": 1,
+    "init_filter_count": 8,
     "kernel_size": [2, 2, 2],
     "kernel_stride": [1, 1, 1],
     "zero_padding": "valid",
@@ -32,8 +32,8 @@ config = {
     "pool_size": [2, 2, 2],
     "pool_stride": [2, 2, 2],
     "multiscale_pooling": False,
-    "top_density": [100, 40, 20], # Change name, top density seems excessive?
-    "density_dropout": [False, False, False],
+    "top_density": [2500, 1000, 400, 200, 100], # Change name, top density seems excessive?
+    "density_dropout": [0.2, 0.1, False, False, False],
     "output_activation": "linear",
     "outputs": [-1.0, 1.0],
     "outputs_category": ["Negative", "Positive"],
